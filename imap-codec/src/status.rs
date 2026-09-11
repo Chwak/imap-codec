@@ -19,7 +19,8 @@ use crate::{
 ///               "RECENT" /
 ///               "UIDNEXT" /
 ///               "UIDVALIDITY" /
-///               "UNSEEN"`
+///               "UNSEEN" /
+///               "SIZE"`      ; RFC 8438
 pub(crate) fn status_att(input: &[u8]) -> IMAPResult<&[u8], StatusDataItemName> {
     alt((
         value(StatusDataItemName::Messages, tag_no_case(b"MESSAGES")),
@@ -32,6 +33,9 @@ pub(crate) fn status_att(input: &[u8]) -> IMAPResult<&[u8], StatusDataItemName> 
             tag_no_case(b"DELETED-STORAGE"),
         ),
         value(StatusDataItemName::Deleted, tag_no_case(b"DELETED")),
+        // RFC 8438 Section 3. It is after DELETED-STORAGE and DELETED only
+        // because `alt` is ordered and no name here is a prefix of SIZE.
+        value(StatusDataItemName::Size, tag_no_case(b"SIZE")),
         #[cfg(feature = "ext_condstore_qresync")]
         value(
             StatusDataItemName::HighestModSeq,
@@ -53,6 +57,7 @@ pub(crate) fn status_att_list(input: &[u8]) -> IMAPResult<&[u8], Vec<StatusDataI
 ///                   "UIDNEXT" SP nz-number /
 ///                   "UIDVALIDITY" SP nz-number /
 ///                   "UNSEEN" SP number /
+///                   "SIZE" SP number64 /                     ; RFC 8438
 ///                   "HIGHESTMODSEQ" SP mod-sequence-valzer
 /// ```
 ///
@@ -87,6 +92,10 @@ fn status_att_val(input: &[u8]) -> IMAPResult<&[u8], StatusDataItem> {
             preceded(tag_no_case(b"DELETED "), number),
             StatusDataItem::Deleted,
         ),
+        map(
+            preceded(tag_no_case(b"SIZE "), number64),
+            StatusDataItem::Size,
+        ),
         #[cfg(feature = "ext_condstore_qresync")]
         map(
             preceded(tag_no_case(b"HIGHESTMODSEQ "), mod_sequence_valzer),
@@ -112,6 +121,7 @@ mod tests {
             (StatusDataItemName::Unseen, b"UNSEEN"),
             (StatusDataItemName::Deleted, b"DELETED"),
             (StatusDataItemName::DeletedStorage, b"DELETED-STORAGE"),
+            (StatusDataItemName::Size, b"SIZE"),
         ];
 
         for test in tests {
@@ -138,6 +148,7 @@ mod tests {
                 StatusDataItem::DeletedStorage(u64::MAX),
                 b"DELETED-STORAGE 18446744073709551615",
             ),
+            (StatusDataItem::Size(4096), b"SIZE 4096"),
         ];
 
         for test in tests {

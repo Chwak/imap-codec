@@ -33,6 +33,14 @@ pub enum StatusDataItemName {
     /// The amount of storage space that can be reclaimed by performing EXPUNGE on the mailbox.
     DeletedStorage,
 
+    /// The total size of the mailbox in octets (RFC 8438, `STATUS=SIZE`).
+    ///
+    /// RFC 9051 Section 6.3.11 makes this part of IMAP4rev2. It is the sum
+    /// of the RFC822.SIZEs, not what the mailbox costs on disk: a server
+    /// that answered with its own storage overhead would be answering a
+    /// different question than the client asked.
+    Size,
+
     #[cfg(feature = "ext_condstore_qresync")]
     #[cfg_attr(docsrs, doc(cfg(feature = "ext_condstore_qresync")))]
     HighestModSeq,
@@ -67,6 +75,9 @@ pub enum StatusDataItem {
 
     /// The amount of storage space that can be reclaimed by performing EXPUNGE on the mailbox.
     DeletedStorage(u64),
+
+    /// The total size of the mailbox in octets (RFC 8438).
+    Size(u64),
 
     #[cfg(feature = "ext_condstore_qresync")]
     #[cfg_attr(docsrs, doc(cfg(feature = "ext_condstore_qresync")))]

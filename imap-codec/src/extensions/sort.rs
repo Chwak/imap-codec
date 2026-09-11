@@ -17,26 +17,35 @@ use nom::{
 use crate::{
     decode::IMAPResult,
     encode::{EncodeContext, EncodeIntoContext},
-    search::search_criteria,
+    search::{search_criteria, search_return_opts},
 };
 
 /// ```abnf
-/// sort = ["UID" SP] "SORT" SP sort-criteria SP search-criteria
+/// sort = ["UID" SP] "SORT" [search-return-opts] SP sort-criteria SP search-criteria
 /// ```
+///
+/// RFC 5267 Section 4 (ESORT) gives `SORT` the `RETURN` options RFC 4731
+/// gave `SEARCH`, in the same place and with the same meaning; the answer
+/// to a `SORT` that carried them is an `ESEARCH` response, not a `SORT`
+/// one.
 pub(crate) fn sort(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     let mut parser = tuple((
         map(opt(tag_no_case("UID ")), |thing| thing.is_some()),
-        tag_no_case("SORT "),
+        tag_no_case("SORT"),
+        opt(search_return_opts),
+        sp,
         sort_criteria,
         sp,
         search_criteria,
     ));
 
-    let (remaining, (uid, _, sort_criteria, _, (charset, search_key))) = parser(input)?;
+    let (remaining, (uid, _, return_options, _, sort_criteria, _, (charset, search_key))) =
+        parser(input)?;
 
     Ok((
         remaining,
         CommandBody::Sort {
+            return_options,
             sort_criteria,
             charset,
             search_criteria: search_key,

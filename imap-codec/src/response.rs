@@ -201,6 +201,7 @@ pub(crate) fn resp_text_code(input: &[u8]) -> IMAPResult<&[u8], Code> {
         resp_code_apnd,
         resp_code_copy,
         value(Code::UidNotSticky, tag_no_case(b"UIDNOTSTICKY")),
+        value(Code::UseAttr, tag_no_case(b"USEATTR")),
         #[cfg(feature = "ext_condstore_qresync")]
         alt((
             map(

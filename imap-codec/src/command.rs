@@ -9,11 +9,12 @@ use abnf_core::streaming::sp;
 use imap_types::command::{FetchModifier, SelectParameter, StoreModifier};
 use imap_types::{
     auth::AuthMechanism,
-    command::{Command, CommandBody},
-    core::AString,
+    command::{AppendData, AppendMessage, CatenatePart, Command, CommandBody},
+    core::{AString, Vec1},
     extensions::binary::LiteralOrLiteral8,
     fetch::{Macro, MacroOrMessageDataItemNames},
     flag::{Flag, StoreResponse, StoreType},
+    mailbox::MailboxUse,
     secret::Secret,
 };
 #[cfg(feature = "ext_condstore_qresync")]
@@ -24,7 +25,7 @@ use nom::{
     branch::alt,
     bytes::streaming::{tag, tag_no_case},
     combinator::{map, opt, value},
-    multi::{separated_list0, separated_list1},
+    multi::{many1, separated_list0, separated_list1},
     sequence::{delimited, preceded, terminated, tuple},
 };
 
@@ -42,7 +43,7 @@ use crate::extensions::metadata::{getmetadata, setmetadata};
 use crate::extensions::namespace::namespace_command;
 use crate::{
     auth::auth_type,
-    core::{astring, base64, literal, tag_imap},
+    core::{astring, atom, base64, literal, tag_imap},
     datetime::date_time,
     decode::{IMAPErrorKind, IMAPResult},
     extensions::{
@@ -175,26 +176,44 @@ pub(crate) fn command_auth(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     ))(input)
 }
 
-/// `append = "APPEND" SP mailbox [SP flag-list] [SP date-time] SP literal`
+/// `append = "APPEND" SP mailbox 1*append-message`      ; RFC 3502
 pub(crate) fn append(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
-    let mut parser = tuple((
-        tag_no_case(b"APPEND "),
-        mailbox,
-        opt(preceded(sp, flag_list)),
-        opt(preceded(sp, date_time)),
-        sp,
-        alt((
-            map(literal, LiteralOrLiteral8::Literal),
-            map(literal8, LiteralOrLiteral8::Literal8),
-        )),
-    ));
+    let mut parser = tuple((tag_no_case(b"APPEND "), mailbox, many1(append_message)));
 
-    let (remaining, (_, mailbox, flags, date, _, message)) = parser(input)?;
+    let (remaining, (_, mailbox, messages)) = parser(input)?;
 
     Ok((
         remaining,
         CommandBody::Append {
             mailbox,
+            messages: Vec1::unvalidated(messages),
+        },
+    ))
+}
+
+/// ```abnf
+/// append-message = append-opts SP append-data
+/// append-opts    = [SP flag-list] [SP date-time]
+/// ```
+///
+/// RFC 3502 Section 6.3.11 (`MULTIAPPEND`), which RFC 9051 Section 6.3.12
+/// carries into IMAP4rev2: `APPEND` takes `1*append-message` rather than
+/// one. Each message brings its own flags and internal date, because the
+/// point of sending several in one command is that they are stored
+/// together and a client that wanted them identical could have said so.
+pub(crate) fn append_message(input: &[u8]) -> IMAPResult<&[u8], AppendMessage> {
+    let mut parser = tuple((
+        opt(preceded(sp, flag_list)),
+        opt(preceded(sp, date_time)),
+        sp,
+        append_data,
+    ));
+
+    let (remaining, (flags, date, _, message)) = parser(input)?;
+
+    Ok((
+        remaining,
+        AppendMessage {
             flags: flags.unwrap_or_default(),
             date,
             message,
@@ -202,15 +221,99 @@ pub(crate) fn append(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     ))
 }
 
-/// `create = "CREATE" SP mailbox`
+/// ```abnf
+/// append-data   = literal8 / literal / catenate-data   ; RFC 4469
+/// catenate-data = "CATENATE" SP "(" cat-part *(SP cat-part) ")"
+/// ```
+///
+/// The literal alternatives come first because `CATENATE` is a keyword
+/// and the two cannot be confused: a message never begins with `{` or a
+/// bare atom in this position.
+pub(crate) fn append_data(input: &[u8]) -> IMAPResult<&[u8], AppendData> {
+    alt((
+        map(literal, |l| {
+            AppendData::Literal(LiteralOrLiteral8::Literal(l))
+        }),
+        map(literal8, |l| {
+            AppendData::Literal(LiteralOrLiteral8::Literal8(l))
+        }),
+        map(
+            delimited(
+                tag_no_case(b"CATENATE ("),
+                separated_list1(sp, cat_part),
+                tag(b")"),
+            ),
+            |parts| AppendData::Catenate(Vec1::unvalidated(parts)),
+        ),
+    ))(input)
+}
+
+/// ```abnf
+/// cat-part = "TEXT" SP literal / "URL" SP astring   ; RFC 4469
+/// ```
+///
+/// `URL` takes an `astring` and not a URL grammar of its own: RFC 4469
+/// Section 6 writes it that way because RFC 5092's `imapurl` is a
+/// character syntax rather than an IMAP one, and what crosses the wire
+/// is a quoted string or a literal like any other. Reading it is the
+/// server's job, not the parser's.
+pub(crate) fn cat_part(input: &[u8]) -> IMAPResult<&[u8], CatenatePart> {
+    alt((
+        map(preceded(tag_no_case(b"TEXT "), literal), CatenatePart::Text),
+        map(preceded(tag_no_case(b"URL "), astring), CatenatePart::Url),
+    ))(input)
+}
+
+/// ```abnf
+/// create = "CREATE" SP mailbox [create-param]         ; RFC 6154, RFC 9051
+///
+/// create-param  = SP "(" "USE" SP "(" use-attr *(SP use-attr) ")" ")"
+///                 ; RFC 9051 writes the outer list as
+///                 ; create-param = "(" create-param-item *(SP …) ")"
+///                 ; and RFC 6154 defines its only item, USE.
+/// ```
 ///
 /// Note: Use of INBOX gives a NO error
+///
+/// RFC 9051 Section 6.3.4 writes `create-param` generally, as a list of
+/// `create-param-name [SP create-param-value]`; RFC 6154 Section 3
+/// defines the only one there is, `USE`. It is spelled out here rather
+/// than parsed generically on purpose: a parameter name this server does
+/// not know must come back `BAD`, and a generic parser that accepted it
+/// would leave the caller unable to tell one it understands from one it
+/// does not.
 pub(crate) fn create(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
-    let mut parser = preceded(tag_no_case(b"CREATE "), mailbox);
+    let use_attrs = delimited(
+        tag_no_case(b" (USE ("),
+        separated_list1(sp, use_attr),
+        tag(b"))"),
+    );
+    let mut parser = tuple((preceded(tag_no_case(b"CREATE "), mailbox), opt(use_attrs)));
 
-    let (remaining, mailbox) = parser(input)?;
+    let (remaining, (mailbox, uses)) = parser(input)?;
 
-    Ok((remaining, CommandBody::Create { mailbox }))
+    Ok((
+        remaining,
+        CommandBody::Create {
+            mailbox,
+            uses: uses.unwrap_or_default(),
+        },
+    ))
+}
+
+/// ```abnf
+/// use-attr = "\\All" / "\\Archive" / "\\Drafts" / "\\Flagged" /
+///            "\\Junk" / "\\Sent" / "\\Trash" / use-attr-ext
+///
+/// use-attr-ext = "\\" atom
+/// ```
+///
+/// RFC 6154 Section 2. `use-attr-ext` is accepted here and refused by the
+/// server, because a client may legitimately ask for an attribute a newer
+/// RFC defined and the answer it is owed is `NO [USEATTR]` — a refusal it
+/// can act on — rather than `BAD`, which says it spoke nonsense.
+pub(crate) fn use_attr(input: &[u8]) -> IMAPResult<&[u8], MailboxUse> {
+    map(preceded(tag(b"\\"), atom), MailboxUse::from)(input)
 }
 
 /// `delete = "DELETE" SP mailbox`
@@ -558,7 +661,30 @@ pub(crate) fn command_select(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
         thread,
         value(CommandBody::Unselect, tag_no_case(b"UNSELECT")),
         r#move,
+        cancelupdate,
     ))(input)
+}
+
+/// ```abnf
+/// cancelupdate = "CANCELUPDATE" 1*(SP tag-string)
+/// ```
+///
+/// RFC 5267 Section 4.5. `tag-string` is an `astring`, and both of the
+/// spellings an astring has are taken: servers and clients differ on
+/// whether they quote a tag, and refusing the unquoted form would refuse
+/// a command that is perfectly well formed.
+pub(crate) fn cancelupdate(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
+    let one = alt((delimited(tag(b"\""), tag_imap, tag(b"\"")), tag_imap));
+    let mut parser = preceded(tag_no_case(b"CANCELUPDATE"), many1(preceded(sp, one)));
+
+    let (remaining, tags) = parser(input)?;
+
+    Ok((
+        remaining,
+        CommandBody::CancelUpdate {
+            tags: Vec1::unvalidated(tags),
+        },
+    ))
 }
 
 /// `copy = "COPY" SP sequence-set SP mailbox`

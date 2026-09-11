@@ -2,34 +2,45 @@ use abnf_core::streaming::sp;
 use imap_types::{
     command::CommandBody,
     core::{Charset, Vec1},
-    search::SearchKey,
+    extensions::uidplus::UidSet,
+    response::Data,
+    search::{EsearchResponse, PartialRange, SearchKey, SearchReturnData, SearchReturnOption},
 };
 use nom::{
     branch::alt,
     bytes::streaming::{tag, tag_no_case},
     combinator::{map, map_opt, opt, value},
-    multi::separated_list1,
-    sequence::{delimited, separated_pair, tuple},
+    multi::{many0, separated_list0, separated_list1},
+    sequence::{delimited, preceded, separated_pair, terminated, tuple},
 };
 
 #[cfg(feature = "ext_condstore_qresync")]
-use crate::extensions::condstore_qresync::search_modsequence;
+use crate::extensions::condstore_qresync::{mod_sequence_value, search_modsequence};
 use crate::{
-    core::{astring, atom, charset, number},
+    core::{astring, atom, charset, number, nz_number, tag_imap},
     datetime::date,
     decode::{IMAPErrorKind, IMAPParseError, IMAPResult},
+    extensions::uidplus::uid_set,
     fetch::header_fld_name,
     sequence::sequence_set,
 };
 
-/// `search = "SEARCH" [SP "CHARSET" SP charset] 1*(SP search-key)`
+/// `search = "SEARCH" [search-return-opts] [SP "CHARSET" SP charset] 1*(SP search-key)`
 ///
 /// Note: CHARSET argument MUST be registered with IANA
 ///
 /// errata id: 261
+///
+/// RFC 4731 Section 3.1 extends the rule with `search-return-opts`, which
+/// RFC 9051 Section 6.4.4 carries into IMAP4rev2. The options come before
+/// the charset, and their presence — not their content — is what makes
+/// the answer an `ESEARCH` rather than a `SEARCH`: `SEARCH RETURN ()` is
+/// defined to mean `RETURN (ALL)` and is a different command from a
+/// `SEARCH` with no `RETURN` at all.
 pub(crate) fn search(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     let mut parser = tuple((
         tag_no_case(b"SEARCH"),
+        opt(search_return_opts),
         opt(map(
             tuple((sp, tag_no_case(b"CHARSET"), sp, charset)),
             |(_, _, _, charset)| charset,
@@ -38,16 +49,75 @@ pub(crate) fn search(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
         map(separated_list1(sp, search_key(9)), Vec1::unvalidated),
     ));
 
-    let (remaining, (_, charset, _, criteria)) = parser(input)?;
+    let (remaining, (_, return_options, charset, _, criteria)) = parser(input)?;
 
     Ok((
         remaining,
         CommandBody::Search {
+            return_options,
             charset,
             criteria,
             uid: false,
         },
     ))
+}
+
+/// ```abnf
+/// search-return-opts = SP "RETURN" SP "(" [search-return-opt *(SP search-return-opt)] ")"
+/// ```
+///
+/// RFC 4731 Section 3.1. An empty list parses to an empty `Vec`, which is
+/// not the same as the rule being absent; the caller keeps that apart by
+/// wrapping this in `opt`.
+pub(crate) fn search_return_opts(input: &[u8]) -> IMAPResult<&[u8], Vec<SearchReturnOption>> {
+    preceded(
+        tuple((sp, tag_no_case(b"RETURN"), sp)),
+        delimited(tag(b"("), separated_list0(sp, search_return_opt), tag(b")")),
+    )(input)
+}
+
+/// ```abnf
+/// search-return-opt = "MIN" / "MAX" / "ALL" / "COUNT" / search-ret-opt-ext
+/// ```
+///
+/// `search-ret-opt-ext` is deliberately not accepted: an option this
+/// server cannot answer must be refused as the syntax error RFC 4731
+/// Section 3.1 makes it ("the server MUST return a tagged BAD response"),
+/// and accepting it here would leave the caller unable to tell an option
+/// it understands from one it does not.
+pub(crate) fn search_return_opt(input: &[u8]) -> IMAPResult<&[u8], SearchReturnOption> {
+    alt((
+        value(SearchReturnOption::Min, tag_no_case(b"MIN")),
+        // Before MAX and ALL, neither of which is a prefix of the other,
+        // but after nothing: the four RFC 4731 names and the three RFC
+        // 5267 ones are distinct words.
+        value(SearchReturnOption::Max, tag_no_case(b"MAX")),
+        value(SearchReturnOption::All, tag_no_case(b"ALL")),
+        value(SearchReturnOption::Count, tag_no_case(b"COUNT")),
+        map(
+            preceded(tuple((tag_no_case(b"PARTIAL"), sp)), partial_range),
+            SearchReturnOption::Partial,
+        ),
+        value(SearchReturnOption::Update, tag_no_case(b"UPDATE")),
+        value(SearchReturnOption::Context, tag_no_case(b"CONTEXT")),
+    ))(input)
+}
+
+/// ```abnf
+/// partial-range = nz-number ":" nz-number
+/// ```
+///
+/// RFC 5267 Section 4.4. Both ends are `nz-number` and neither may be
+/// `*`: `PARTIAL 1:*` and `PARTIAL *:1` are syntax errors, and so is a
+/// bare `PARTIAL 1`. That is not pedantry — a server that guessed at
+/// what `1:*` meant would answer a different question from the one the
+/// next server answers, and the whole point of the option is that a
+/// client can page through a result the same way everywhere.
+pub(crate) fn partial_range(input: &[u8]) -> IMAPResult<&[u8], PartialRange> {
+    map(
+        separated_pair(nz_number, tag(b":"), nz_number),
+        |(from, to)| PartialRange::new(from, to),
+    )(input)
 }
 
 /// ```abnf
@@ -240,6 +310,117 @@ pub(crate) fn search_criteria(input: &[u8]) -> IMAPResult<&[u8], (Charset, Vec1<
     Ok((remaining, (charset, search_keys)))
 }
 
+/// ```abnf
+/// esearch-response  = "ESEARCH" [search-correlator] [SP "UID"]
+///                     *(SP search-return-data)
+/// search-correlator = SP "(" "TAG" SP tag-string ")"
+/// ```
+///
+/// RFC 4731 Section 3.2. The correlator is the point of the response: a
+/// client that pipelined several searches has no other way to tell the
+/// answers apart, because an untagged `SEARCH` carries no tag.
+pub(crate) fn esearch_response(input: &[u8]) -> IMAPResult<&[u8], Data> {
+    let mut parser = tuple((
+        tag_no_case(b"ESEARCH"),
+        opt(delimited(
+            tuple((sp, tag(b"("), tag_no_case(b"TAG"), sp)),
+            // `tag-string` is an astring. A tag is the subset of it a
+            // command could have carried, so reading it as one refuses a
+            // correlator that answers no command anybody could have sent;
+            // both spellings an astring has for such a string are taken,
+            // because servers differ on whether they quote it.
+            alt((delimited(tag(b"\""), tag_imap, tag(b"\"")), tag_imap)),
+            tag(b")"),
+        )),
+        opt(preceded(sp, tag_no_case(b"UID"))),
+        many0(preceded(sp, search_return_data)),
+    ));
+
+    let (remaining, (_, correlator, uid, items)) = parser(input)?;
+
+    Ok((
+        remaining,
+        Data::Esearch(EsearchResponse {
+            correlator,
+            uid: uid.is_some(),
+            items,
+        }),
+    ))
+}
+
+/// ```abnf
+/// search-return-data = "MIN" SP nz-number /
+///                      "MAX" SP nz-number /
+///                      "ALL" SP sequence-set /
+///                      "COUNT" SP number
+///
+/// search-return-data =/ "MODSEQ" SP mod-sequence-value    ; RFC 7162
+/// ```
+pub(crate) fn search_return_data(input: &[u8]) -> IMAPResult<&[u8], SearchReturnData> {
+    alt((
+        map(
+            preceded(tuple((tag_no_case(b"MIN"), sp)), nz_number),
+            SearchReturnData::Min,
+        ),
+        map(
+            preceded(tuple((tag_no_case(b"MAX"), sp)), nz_number),
+            SearchReturnData::Max,
+        ),
+        map(
+            preceded(tuple((tag_no_case(b"ALL"), sp)), uid_set),
+            SearchReturnData::All,
+        ),
+        map(
+            preceded(tuple((tag_no_case(b"COUNT"), sp)), number),
+            SearchReturnData::Count,
+        ),
+        #[cfg(feature = "ext_condstore_qresync")]
+        map(
+            preceded(tuple((tag_no_case(b"MODSEQ"), sp)), mod_sequence_value),
+            SearchReturnData::ModSeq,
+        ),
+        map(
+            preceded(
+                tuple((tag_no_case(b"PARTIAL"), sp, tag(b"("))),
+                terminated(
+                    separated_pair(
+                        partial_range,
+                        sp,
+                        alt((map(uid_set, Some), value(None, tag_no_case(b"NIL")))),
+                    ),
+                    tag(b")"),
+                ),
+            ),
+            |(range, results)| SearchReturnData::Partial(range, results),
+        ),
+        map(context_update(b"ADDTO"), |(position, set)| {
+            SearchReturnData::AddTo(position, set)
+        }),
+        map(context_update(b"REMOVEFROM"), |(position, set)| {
+            SearchReturnData::RemoveFrom(position, set)
+        }),
+    ))(input)
+}
+
+/// ```abnf
+/// "ADDTO" SP "(" context-position SP uid-set ")"
+/// "REMOVEFROM" SP "(" context-position SP uid-set ")"
+/// context-position = number
+/// ```
+///
+/// RFC 5267 Sections 4.3.1 and 4.3.2, which have the same shape and
+/// differ only in the word. The position is a plain `number` and may be
+/// zero: a search left open without `CONTEXT` has no result stored to
+/// count positions in, and zero is what says so.
+fn context_update(word: &'static [u8]) -> impl FnMut(&[u8]) -> IMAPResult<&[u8], (u32, UidSet)> {
+    move |input| {
+        preceded(
+            tuple((tag_no_case(word), sp, tag(b"("))),
+            terminated(separated_pair(number, sp, uid_set), tag(b")")),
+        )(input)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use imap_types::{
@@ -262,6 +443,7 @@ mod tests {
         assert_eq!(
             val,
             CommandBody::Search {
+                return_options: None,
                 charset: None,
                 criteria: Vec1::from(And(Vec1::from(Uid(SequenceSetData(
                     vec![Single(Value(5.try_into().unwrap()))]
@@ -274,6 +456,7 @@ mod tests {
 
         let (_rem, val) = search(b"search (uid 5 or uid 5 (uid 1 uid 2) not uid 5)???").unwrap();
         let expected = CommandBody::Search {
+            return_options: None,
             charset: None,
             criteria: Vec1::from(And(vec![
                 Uid(SequenceSetData(

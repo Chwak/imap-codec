@@ -29,8 +29,8 @@ use crate::{
     },
     fetch::MacroOrMessageDataItemNames,
     flag::{Flag, StoreResponse, StoreType},
-    mailbox::{ListMailbox, Mailbox},
-    search::SearchKey,
+    mailbox::{ListMailbox, Mailbox, MailboxUse},
+    search::{SearchKey, SearchReturnOption},
     secret::Secret,
     sequence::SequenceSet,
     status::StatusDataItemName,
@@ -63,6 +63,81 @@ impl<'a> Command<'a> {
     pub fn name(&self) -> &'static str {
         self.body.name()
     }
+}
+
+/// One message of an `APPEND`, with the flags and internal date it is to
+/// be stored with.
+///
+/// ```abnf
+/// append-message = [SP flag-list] [SP date-time] SP literal
+/// ```
+///
+/// RFC 3502 Section 6.3.11.
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub struct AppendMessage<'a> {
+    /// Flags.
+    pub flags: Vec<Flag<'a>>,
+    /// Datetime.
+    pub date: Option<DateTime>,
+    /// The message itself, sent whole or assembled from parts.
+    pub message: AppendData<'a>,
+}
+
+/// What an `APPEND` gives the server to store: the message, or the
+/// recipe for it.
+///
+/// ```abnf
+/// append-data   = literal8 / literal / catenate-data   ; RFC 4469
+/// catenate-data = "CATENATE" SP "(" cat-part *(SP cat-part) ")"
+/// ```
+///
+/// RFC 4469 Section 3 is about not sending bytes the server already
+/// has: a client saving a reply to its Sent folder, or forwarding a
+/// message with its attachments, would otherwise download the original
+/// and upload it again. `CATENATE` lets it name the parts instead.
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "content"))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub enum AppendData<'a> {
+    /// The message as one literal.
+    ///
+    /// <div class="warning">
+    /// Use [`LiteralOrLiteral8::Literal8`] only when the server advertised [`Capability::Binary`](crate::response::Capability::Binary).
+    /// </div>
+    Literal(LiteralOrLiteral8<'a>),
+    /// `CATENATE (…)`: the parts, in the order to join them.
+    ///
+    /// <div class="warning">
+    /// Use only when the server advertised [`Capability::Catenate`](crate::response::Capability::Catenate).
+    /// </div>
+    Catenate(Vec1<CatenatePart<'a>>),
+}
+
+/// One piece of a `CATENATE` (RFC 4469 Section 6).
+///
+/// ```abnf
+/// cat-part = "TEXT" SP literal / "URL" SP astring
+/// ```
+///
+/// The two are not interchangeable and the distinction is the point of
+/// the extension: `TEXT` is bytes the client is sending now, `URL` is
+/// bytes the server is asked to find for itself. A `URL` that names
+/// nothing — a mailbox that is gone, a `UIDVALIDITY` that has moved on —
+/// fails the whole command (RFC 4469 Section 4), which is why it cannot
+/// simply be read as text that happens to be empty.
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "content"))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub enum CatenatePart<'a> {
+    /// `TEXT SP literal`: bytes sent inline.
+    Text(Literal<'a>),
+    /// `URL SP astring`: an IMAP URL (RFC 5092) naming bytes the server
+    /// already holds.
+    Url(AString<'a>),
 }
 
 /// Command body.
@@ -412,6 +487,27 @@ pub enum CommandBody<'a> {
     /// </div>
     Unselect,
 
+    /// ### RFC 5267 Section 4.5. CANCELUPDATE Command
+    ///
+    /// ```abnf
+    /// cancelupdate = "CANCELUPDATE" 1*(SP tag-string)
+    /// ```
+    ///
+    /// Stop keeping a search left open by `SEARCH RETURN (UPDATE)` up to
+    /// date. The searches are named by the tags of the commands that
+    /// started them, which is the only handle a client has on them: the
+    /// `ESEARCH` updates carry that tag and nothing else.
+    ///
+    /// <div class="warning">
+    /// This extension must only be used when the server advertised support for it sending the CONTEXT=SEARCH or CONTEXT=SORT capability.
+    /// </div>
+    CancelUpdate {
+        /// The tags of the searches to forget. A tag that names no open
+        /// search is not an error (RFC 5267 Section 4.5): a client and a
+        /// server may each have decided to drop it.
+        tags: Vec1<Tag<'a>>,
+    },
+
     /// 6.3.2.  EXAMINE Command
     ///
     /// Arguments:  mailbox name
@@ -484,6 +580,16 @@ pub enum CommandBody<'a> {
     Create {
         /// Mailbox.
         mailbox: Mailbox<'a>,
+        /// What the mailbox is for (RFC 6154 Section 3, `USE (…)`).
+        ///
+        /// <div class="warning">
+        /// Send these only when the server advertised [`Capability::CreateSpecialUse`](crate::response::Capability::CreateSpecialUse).
+        /// </div>
+        ///
+        /// Empty is a `CREATE` with no parameters at all — the RFC 3501
+        /// command — and is not the same as `USE ()`, which the grammar
+        /// does not allow: `use-attr-list` is `1*use-attr`.
+        uses: Vec<MailboxUse<'a>>,
     },
 
     /// 6.3.4.  DELETE Command
@@ -902,16 +1008,20 @@ pub enum CommandBody<'a> {
     Append {
         /// Mailbox.
         mailbox: Mailbox<'a>,
-        /// Flags.
-        flags: Vec<Flag<'a>>,
-        /// Datetime.
-        date: Option<DateTime>,
-        /// Message to append.
+        /// The messages to append, in order.
         ///
         /// <div class="warning">
-        /// Use [`LiteralOrLiteral8::Literal8`] only when the server advertised [`Capability::Binary`](crate::response::Capability::Binary).
+        /// Send more than one only when the server advertised [`Capability::MultiAppend`](crate::response::Capability::MultiAppend).
         /// </div>
-        message: LiteralOrLiteral8<'a>,
+        ///
+        /// RFC 3502 (`MULTIAPPEND`) turns `APPEND`'s single message into
+        /// `1*append-message`, and RFC 9051 Section 6.3.12 makes that the
+        /// shape of `APPEND` in IMAP4rev2. The list is what makes the
+        /// atomicity RFC 3502 Section 6.3.11 requires expressible at all:
+        /// either every message in one command is appended or none is, and
+        /// a server cannot promise that about messages it was handed one
+        /// command at a time.
+        messages: Vec1<AppendMessage<'a>>,
     },
 
     // ----- Selected State (https://tools.ietf.org/html/rfc3501#section-6.4) -----
@@ -1063,6 +1173,12 @@ pub enum CommandBody<'a> {
     /// "XXXXXX" is a placeholder for what would be 6 octets of
     /// 8-bit data in an actual transaction.
     Search {
+        /// What to return instead of the whole list of matches
+        /// (RFC 4731 Section 3.1): `None` is a `SEARCH` with no `RETURN`
+        /// at all, which is answered by the untagged `SEARCH` response
+        /// of RFC 3501; `Some(vec![])` is `SEARCH RETURN ()`, which is
+        /// answered by an `ESEARCH` and means `ALL`.
+        return_options: Option<Vec<SearchReturnOption>>,
         /// Charset.
         charset: Option<Charset<'a>>,
         /// Criteria.
@@ -1087,6 +1203,10 @@ pub enum CommandBody<'a> {
     /// This extension must only be used when the server advertised support for it sending the SORT capability.
     /// </div>
     Sort {
+        /// What to return instead of the whole list of matches
+        /// (RFC 5267 Section 4, which gives `SORT` the `RETURN` options
+        /// RFC 4731 gave `SEARCH`). `None` is a plain `SORT`.
+        return_options: Option<Vec<SearchReturnOption>>,
         /// Sort criteria.
         sort_criteria: Vec1<SortCriterion>,
         /// Charset.
@@ -1627,6 +1747,7 @@ impl<'a> CommandBody<'a> {
     {
         Ok(CommandBody::Create {
             mailbox: mailbox.try_into()?,
+            uses: Vec::default(),
         })
     }
 
@@ -1729,15 +1850,20 @@ impl<'a> CommandBody<'a> {
     {
         Ok(CommandBody::Append {
             mailbox: mailbox.try_into().map_err(AppendError::Mailbox)?,
-            flags,
-            date,
-            message: LiteralOrLiteral8::Literal(message.try_into().map_err(AppendError::Data)?),
+            messages: Vec1::from(AppendMessage {
+                flags,
+                date,
+                message: AppendData::Literal(LiteralOrLiteral8::Literal(
+                    message.try_into().map_err(AppendError::Data)?,
+                )),
+            }),
         })
     }
 
     /// Construct a SEARCH command.
     pub fn search(charset: Option<Charset<'a>>, criteria: Vec1<SearchKey<'a>>, uid: bool) -> Self {
         CommandBody::Search {
+            return_options: None,
             charset,
             criteria,
             uid,
@@ -1816,6 +1942,7 @@ impl<'a> CommandBody<'a> {
             Self::Sort { .. } => "SORT",
             Self::Thread { .. } => "THREAD",
             Self::Unselect => "UNSELECT",
+            Self::CancelUpdate { .. } => "CANCELUPDATE",
             Self::Examine { .. } => "EXAMINE",
             Self::Create { .. } => "CREATE",
             Self::Delete { .. } => "DELETE",
@@ -2177,6 +2304,7 @@ mod tests {
             (
                 CommandBody::Create {
                     mailbox: Mailbox::Inbox,
+                    uses: Vec::new(),
                 },
                 "CREATE",
             ),
@@ -2229,20 +2357,26 @@ mod tests {
             (
                 CommandBody::Append {
                     mailbox: Mailbox::Inbox,
-                    flags: vec![],
-                    date: None,
-                    message: LiteralOrLiteral8::Literal(Literal::try_from("").unwrap()),
+                    messages: Vec1::from(AppendMessage {
+                        flags: vec![],
+                        date: None,
+                        message: AppendData::Literal(LiteralOrLiteral8::Literal(
+                            Literal::try_from("").unwrap(),
+                        )),
+                    }),
                 },
                 "APPEND",
             ),
             (
                 CommandBody::Append {
                     mailbox: Mailbox::Inbox,
-                    flags: vec![],
-                    date: None,
-                    message: LiteralOrLiteral8::Literal8(Literal8 {
-                        data: b"Hello\x00World\x00".as_ref().into(),
-                        mode: LiteralMode::NonSync,
+                    messages: Vec1::from(AppendMessage {
+                        flags: vec![],
+                        date: None,
+                        message: AppendData::Literal(LiteralOrLiteral8::Literal8(Literal8 {
+                            data: b"Hello\x00World\x00".as_ref().into(),
+                            mode: LiteralMode::NonSync,
+                        })),
                     }),
                 },
                 "APPEND",
@@ -2252,6 +2386,7 @@ mod tests {
             (CommandBody::Expunge, "EXPUNGE"),
             (
                 CommandBody::Search {
+                    return_options: None,
                     charset: None,
                     criteria: Vec1::from(SearchKey::Recent),
                     uid: true,

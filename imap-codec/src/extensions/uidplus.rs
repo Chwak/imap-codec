@@ -37,11 +37,16 @@ pub(crate) fn uid_expunge(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
 ///
 /// append-uid = uniqueid
 ///
+/// append-uid =/ uid-set                ; RFC 4315, only for MULTIAPPEND
+///
 /// uniqueid = nz-number
 /// ```
+///
+/// `uid-set` covers `uniqueid`, a single number being a set of one, so
+/// the two productions are read by one parser.
 pub(crate) fn resp_code_apnd(input: &[u8]) -> IMAPResult<&[u8], Code> {
     let (rem, (_, uid_validity, _, uid)) =
-        tuple((tag_no_case("APPENDUID "), nz_number, sp, nz_number))(input)?;
+        tuple((tag_no_case("APPENDUID "), nz_number, sp, uid_set))(input)?;
 
     Ok((rem, Code::AppendUid { uid_validity, uid }))
 }
@@ -185,7 +190,7 @@ mod tests {
                     kind: StatusKind::Ok,
                     code: Some(Code::AppendUid {
                         uid_validity: 12345.try_into().unwrap(),
-                        uid: 1337.try_into().unwrap(),
+                        uid: UidSet::from(std::num::NonZeroU32::try_from(1337u32).unwrap()),
                     }),
                     text: Text::unvalidated("..."),
                 })),

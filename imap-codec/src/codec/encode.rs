@@ -59,7 +59,7 @@ use imap_types::{
         BasicFields, Body, BodyExtension, BodyStructure, Disposition, Language, Location,
         MultiPartExtensionData, SinglePartExtensionData, SpecificFields,
     },
-    command::{Command, CommandBody},
+    command::{AppendData, AppendMessage, CatenatePart, Command, CommandBody},
     core::{
         AString, Atom, AtomExt, Charset, IString, Literal, LiteralMode, NString, NString8, Quoted,
         QuotedChar, Tag, Text,
@@ -71,12 +71,12 @@ use imap_types::{
         Macro, MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName, Part, Section,
     },
     flag::{Flag, FlagFetch, FlagNameAttribute, FlagPerm, StoreResponse, StoreType},
-    mailbox::{ListCharString, ListMailbox, Mailbox, MailboxOther},
+    mailbox::{ListCharString, ListMailbox, Mailbox, MailboxOther, MailboxUse},
     response::{
         Bye, Capability, Code, CodeOther, CommandContinuationRequest, Data, Greeting, GreetingKind,
         Response, Status, StatusBody, StatusKind, Tagged,
     },
-    search::SearchKey,
+    search::{EsearchResponse, PartialRange, SearchKey, SearchReturnData, SearchReturnOption},
     sequence::{SeqOrUid, Sequence, SequenceSet},
     status::{StatusDataItem, StatusDataItemName},
     utils::escape_quoted,
@@ -343,6 +343,19 @@ impl EncodeIntoContext for CommandBody<'_> {
                 Ok(())
             }
             CommandBody::Unselect => ctx.write_all(b"UNSELECT"),
+            CommandBody::CancelUpdate { tags } => {
+                ctx.write_all(b"CANCELUPDATE")?;
+                // RFC 5267 Section 4.5 writes each tag as a
+                // `tag-string`, which is an astring; quoting it always
+                // is the spelling every server sends and the one a
+                // client reading its own log recognises.
+                for tag in tags.as_ref() {
+                    ctx.write_all(b" \"")?;
+                    tag.encode_ctx(ctx)?;
+                    ctx.write_all(b"\"")?;
+                }
+                Ok(())
+            }
             CommandBody::Examine {
                 mailbox,
                 #[cfg(feature = "ext_condstore_qresync")]
@@ -360,9 +373,15 @@ impl EncodeIntoContext for CommandBody<'_> {
 
                 Ok(())
             }
-            CommandBody::Create { mailbox } => {
+            CommandBody::Create { mailbox, uses } => {
                 ctx.write_all(b"CREATE ")?;
-                mailbox.encode_ctx(ctx)
+                mailbox.encode_ctx(ctx)?;
+                if !uses.is_empty() {
+                    ctx.write_all(b" (USE (")?;
+                    join_serializable(uses, b" ", ctx)?;
+                    ctx.write_all(b"))")?;
+                }
+                Ok(())
             }
             CommandBody::Delete { mailbox } => {
                 ctx.write_all(b"DELETE ")?;
@@ -413,28 +432,19 @@ impl EncodeIntoContext for CommandBody<'_> {
                 join_serializable(item_names, b" ", ctx)?;
                 ctx.write_all(b")")
             }
-            CommandBody::Append {
-                mailbox,
-                flags,
-                date,
-                message,
-            } => {
+            CommandBody::Append { mailbox, messages } => {
                 ctx.write_all(b"APPEND ")?;
                 mailbox.encode_ctx(ctx)?;
 
-                if !flags.is_empty() {
-                    ctx.write_all(b" (")?;
-                    join_serializable(flags, b" ", ctx)?;
-                    ctx.write_all(b")")?;
+                // No separator between the messages: `append-message`
+                // begins with the space itself (RFC 3502 Section 6.3.11),
+                // because its first two parts are optional and a separator
+                // written here would double the one before a flag list.
+                for message in messages.as_ref() {
+                    message.encode_ctx(ctx)?;
                 }
 
-                if let Some(date) = date {
-                    ctx.write_all(b" ")?;
-                    date.encode_ctx(ctx)?;
-                }
-
-                ctx.write_all(b" ")?;
-                message.encode_ctx(ctx)
+                Ok(())
             }
             CommandBody::Check => ctx.write_all(b"CHECK"),
             CommandBody::Close => ctx.write_all(b"CLOSE"),
@@ -444,6 +454,7 @@ impl EncodeIntoContext for CommandBody<'_> {
                 sequence_set.encode_ctx(ctx)
             }
             CommandBody::Search {
+                return_options,
                 charset,
                 criteria,
                 uid,
@@ -453,6 +464,7 @@ impl EncodeIntoContext for CommandBody<'_> {
                 } else {
                     ctx.write_all(b"SEARCH")?;
                 }
+                encode_search_return_opts(return_options.as_deref(), ctx)?;
                 if let Some(charset) = charset {
                     ctx.write_all(b" CHARSET ")?;
                     charset.encode_ctx(ctx)?;
@@ -461,16 +473,19 @@ impl EncodeIntoContext for CommandBody<'_> {
                 join_serializable(criteria.as_ref(), b" ", ctx)
             }
             CommandBody::Sort {
+                return_options,
                 sort_criteria,
                 charset,
                 search_criteria,
                 uid,
             } => {
                 if *uid {
-                    ctx.write_all(b"UID SORT (")?;
+                    ctx.write_all(b"UID SORT")?;
                 } else {
-                    ctx.write_all(b"SORT (")?;
+                    ctx.write_all(b"SORT")?;
                 }
+                encode_search_return_opts(return_options.as_deref(), ctx)?;
+                ctx.write_all(b" (")?;
                 join_serializable(sort_criteria.as_ref(), b" ", ctx)?;
                 ctx.write_all(b") ")?;
                 charset.encode_ctx(ctx)?;
@@ -859,6 +874,7 @@ impl EncodeIntoContext for StatusDataItemName {
             Self::Unseen => ctx.write_all(b"UNSEEN"),
             Self::Deleted => ctx.write_all(b"DELETED"),
             Self::DeletedStorage => ctx.write_all(b"DELETED-STORAGE"),
+            Self::Size => ctx.write_all(b"SIZE"),
             #[cfg(feature = "ext_condstore_qresync")]
             Self::HighestModSeq => ctx.write_all(b"HIGHESTMODSEQ"),
         }
@@ -1411,6 +1427,7 @@ impl EncodeIntoContext for Code<'_> {
                 destination.encode_ctx(ctx)
             }
             Code::UidNotSticky => ctx.write_all(b"UIDNOTSTICKY"),
+            Code::UseAttr => ctx.write_all(b"USEATTR"),
             Code::Other(unknown) => unknown.encode_ctx(ctx),
         }
     }
@@ -1425,6 +1442,139 @@ impl EncodeIntoContext for CodeOther<'_> {
 impl EncodeIntoContext for Text<'_> {
     fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
         ctx.write_all(self.inner().as_bytes())
+    }
+}
+
+/// `search-return-opts` (RFC 4731 Section 3.1), which is absent rather
+/// than empty when a command carries no `RETURN` at all: `SEARCH` and
+/// `SEARCH RETURN ()` are two different commands with two different
+/// shapes of answer.
+fn encode_search_return_opts(
+    options: Option<&[SearchReturnOption]>,
+    ctx: &mut EncodeContext,
+) -> std::io::Result<()> {
+    let Some(options) = options else {
+        return Ok(());
+    };
+    ctx.write_all(b" RETURN (")?;
+    join_serializable(options, b" ", ctx)?;
+    ctx.write_all(b")")
+}
+
+impl EncodeIntoContext for SearchReturnOption {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        ctx.write_all(self.as_ref().as_bytes())?;
+        // `PARTIAL` is the one option that carries an argument, and RFC
+        // 5267 §4.4 writes `"PARTIAL" SP partial-range` — the space is
+        // part of the rule, not decoration. Without it the parser
+        // cannot read what this wrote, which is the whole point of
+        // `fuzz_targets/imap_grammar.rs` and is how this line was
+        // found. The other six options are the bare word `as_ref`
+        // already wrote.
+        match self {
+            Self::Partial(range) => {
+                ctx.write_all(b" ")?;
+                range.encode_ctx(ctx)
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+impl EncodeIntoContext for PartialRange {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        write!(ctx, "{}:{}", self.from, self.to)
+    }
+}
+
+impl EncodeIntoContext for SearchReturnData {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        match self {
+            Self::Min(value) => write!(ctx, "MIN {value}"),
+            Self::Max(value) => write!(ctx, "MAX {value}"),
+            Self::All(set) => {
+                ctx.write_all(b"ALL ")?;
+                set.encode_ctx(ctx)
+            }
+            Self::Count(value) => write!(ctx, "COUNT {value}"),
+            #[cfg(feature = "ext_condstore_qresync")]
+            Self::ModSeq(value) => write!(ctx, "MODSEQ {value}"),
+            Self::Partial(range, results) => {
+                ctx.write_all(b"PARTIAL (")?;
+                range.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                match results {
+                    Some(set) => set.encode_ctx(ctx)?,
+                    // RFC 5267 Section 4.4: a range past the end of the
+                    // result is answered `NIL`, not with an empty set —
+                    // a sequence set has no spelling for empty.
+                    None => ctx.write_all(b"NIL")?,
+                }
+                ctx.write_all(b")")
+            }
+            Self::AddTo(position, set) => {
+                write!(ctx, "ADDTO ({position} ")?;
+                set.encode_ctx(ctx)?;
+                ctx.write_all(b")")
+            }
+            Self::RemoveFrom(position, set) => {
+                write!(ctx, "REMOVEFROM ({position} ")?;
+                set.encode_ctx(ctx)?;
+                ctx.write_all(b")")
+            }
+        }
+    }
+}
+
+impl EncodeIntoContext for MailboxUse<'_> {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        write!(ctx, "{self}")
+    }
+}
+
+impl EncodeIntoContext for AppendMessage<'_> {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        if !self.flags.is_empty() {
+            ctx.write_all(b" (")?;
+            join_serializable(&self.flags, b" ", ctx)?;
+            ctx.write_all(b")")?;
+        }
+
+        if let Some(date) = &self.date {
+            ctx.write_all(b" ")?;
+            date.encode_ctx(ctx)?;
+        }
+
+        ctx.write_all(b" ")?;
+        self.message.encode_ctx(ctx)
+    }
+}
+
+impl EncodeIntoContext for AppendData<'_> {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        match self {
+            AppendData::Literal(literal) => literal.encode_ctx(ctx),
+            AppendData::Catenate(parts) => {
+                ctx.write_all(b"CATENATE (")?;
+                join_serializable(parts.as_ref(), b" ", ctx)?;
+                ctx.write_all(b")")
+            }
+        }
+    }
+}
+
+impl EncodeIntoContext for CatenatePart<'_> {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        match self {
+            CatenatePart::Text(literal) => {
+                ctx.write_all(b"TEXT ")?;
+                literal.encode_ctx(ctx)
+            }
+            CatenatePart::Url(url) => {
+                ctx.write_all(b"URL ")?;
+                url.encode_ctx(ctx)
+            }
+        }
     }
 }
 
@@ -1530,6 +1680,30 @@ impl EncodeIntoContext for Data<'_> {
                     ctx.write_all(b" (MODSEQ ")?;
                     modseq.encode_ctx(ctx)?;
                     ctx.write_all(b")")?;
+                }
+            }
+            // RFC 4731 Section 3.2. A datum that found nothing is left
+            // out rather than sent empty — `MIN`, `MAX` and `ALL` have no
+            // spelling for "nothing", and `COUNT 0` is the one that does —
+            // which is why the caller decides what is in `items` and this
+            // only writes what it is given.
+            Data::Esearch(EsearchResponse {
+                correlator,
+                uid,
+                items,
+            }) => {
+                ctx.write_all(b"* ESEARCH")?;
+                if let Some(tag) = correlator {
+                    ctx.write_all(b" (TAG \"")?;
+                    tag.encode_ctx(ctx)?;
+                    ctx.write_all(b"\")")?;
+                }
+                if *uid {
+                    ctx.write_all(b" UID")?;
+                }
+                for item in items {
+                    ctx.write_all(b" ")?;
+                    item.encode_ctx(ctx)?;
                 }
             }
             Data::Thread(threads) => {
@@ -1700,6 +1874,10 @@ impl EncodeIntoContext for StatusDataItem {
                 ctx.write_all(b"DELETED-STORAGE ")?;
                 count.encode_ctx(ctx)
             }
+            Self::Size(octets) => {
+                ctx.write_all(b"SIZE ")?;
+                octets.encode_ctx(ctx)
+            }
             #[cfg(feature = "ext_condstore_qresync")]
             Self::HighestModSeq(value) => {
                 ctx.write_all(b"HIGHESTMODSEQ ")?;
@@ -1776,8 +1954,14 @@ impl EncodeIntoContext for MessageDataItem<'_> {
                 ctx.write_all(b"] ")?;
                 size.encode_ctx(ctx)
             }
+            // RFC 7162 Section 3.1.4.1 gives `fetch-mod-resp` as
+            // "MODSEQ" SP "(" permsg-modsequence ")": the parentheses are
+            // part of the syntax, and `msg_att_dynamic` below has always
+            // required them when reading. Writing the item without them
+            // produced a FETCH response that this crate's own parser
+            // rejects, which is why a server could not advertise CONDSTORE.
             #[cfg(feature = "ext_condstore_qresync")]
-            Self::ModSeq(value) => write!(ctx, "MODSEQ {value}"),
+            Self::ModSeq(value) => write!(ctx, "MODSEQ ({value})"),
         }
     }
 }

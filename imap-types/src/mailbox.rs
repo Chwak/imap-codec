@@ -1,15 +1,21 @@
 //! Mailbox-related types.
 
-use std::{borrow::Cow, str::from_utf8};
+use std::{
+    borrow::Cow,
+    fmt::{Display, Formatter},
+    str::from_utf8,
+};
 
 #[cfg(feature = "arbitrary")]
-use arbitrary::Arbitrary;
+use arbitrary::{Arbitrary, Unstructured};
 use bounded_static_derive::ToStatic;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "arbitrary")]
+use crate::arbitrary::impl_arbitrary_try_from;
 use crate::{
-    core::{AString, IString, impl_try_from},
+    core::{AString, Atom, IString, impl_try_from},
     error::{ValidationError, ValidationErrorKind},
     mailbox::error::MailboxOtherError,
     utils::indicators::is_list_char,
@@ -364,5 +370,86 @@ mod tests {
             err.to_string(),
             r"Reserved: Please use one of the typed variants"
         );
+    }
+}
+
+/// What a mailbox is for: RFC 6154's special-use attributes.
+///
+/// A client uses these two ways round. A server that advertises
+/// `SPECIAL-USE` reports them as name attributes in its `LIST` responses,
+/// so a client can find the mailbox sent mail belongs in without guessing
+/// from its name — which is the whole point, since the name is in the
+/// user's language and "Sent" is not. A server that advertises
+/// `CREATE-SPECIAL-USE` also accepts them on `CREATE`, so a client
+/// setting an account up can say what it is making rather than hoping the
+/// server guesses.
+///
+/// ```abnf
+/// use-attr = "\\All" / "\\Archive" / "\\Drafts" / "\\Flagged" /
+///            "\\Junk" / "\\Sent" / "\\Trash" / use-attr-ext
+/// ```
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "content"))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub enum MailboxUse<'a> {
+    /// Every message, however it is filed (`\All`).
+    All,
+    /// Kept but out of the way (`\Archive`).
+    Archive,
+    /// Written and not sent (`\Drafts`).
+    Drafts,
+    /// Marked as important (`\Flagged`).
+    Flagged,
+    /// Spam (`\Junk`).
+    Junk,
+    /// Sent (`\Sent`).
+    Sent,
+    /// Deleted, pending removal (`\Trash`).
+    Trash,
+    /// `use-attr-ext`: an attribute this crate has no name for.
+    Other(MailboxUseOther<'a>),
+}
+
+impl<'a> From<Atom<'a>> for MailboxUse<'a> {
+    fn from(value: Atom<'a>) -> Self {
+        match value.as_ref().to_ascii_lowercase().as_ref() {
+            "all" => Self::All,
+            "archive" => Self::Archive,
+            "drafts" => Self::Drafts,
+            "flagged" => Self::Flagged,
+            "junk" => Self::Junk,
+            "sent" => Self::Sent,
+            "trash" => Self::Trash,
+            _ => Self::Other(MailboxUseOther(value)),
+        }
+    }
+}
+
+impl Display for MailboxUse<'_> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            Self::All => f.write_str("\\All"),
+            Self::Archive => f.write_str("\\Archive"),
+            Self::Drafts => f.write_str("\\Drafts"),
+            Self::Flagged => f.write_str("\\Flagged"),
+            Self::Junk => f.write_str("\\Junk"),
+            Self::Sent => f.write_str("\\Sent"),
+            Self::Trash => f.write_str("\\Trash"),
+            Self::Other(other) => write!(f, "\\{}", other.0),
+        }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl_arbitrary_try_from! { MailboxUse<'a>, Atom<'a> }
+
+/// A special-use attribute this crate has no name for.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub struct MailboxUseOther<'a>(Atom<'a>);
+
+impl AsRef<str> for MailboxUseOther<'_> {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
     }
 }
