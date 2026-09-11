@@ -41,6 +41,7 @@ use crate::{
     flag::{Flag, FlagNameAttribute, FlagPerm},
     mailbox::Mailbox,
     response::error::{ContinueError, FetchError},
+    search::EsearchResponse,
     status::StatusDataItem,
 };
 
@@ -445,6 +446,14 @@ pub enum Data<'a> {
     ),
 
     Thread(Vec<Thread>),
+
+    /// ### ESEARCH Response (RFC 4731 Section 3.2, RFC 9051 Section 7.3.4)
+    ///
+    /// The answer to a `SEARCH` or `SORT` that carried `RETURN`. It is
+    /// not merely a terser `SEARCH`: it names the tag of the command it
+    /// answers, so a client that pipelined several searches can tell the
+    /// answers apart, which the untagged `SEARCH` response cannot.
+    Esearch(EsearchResponse<'a>),
 
     /// ### 7.2.6.  FLAGS Response
     ///
@@ -891,12 +900,18 @@ pub enum Code<'a> {
     /// Server does not know how to decode the section's CTE.
     UnknownCte,
 
-    /// Message has been appended to destination mailbox with that UID
+    /// Message(s) have been appended to destination mailbox with those UIDs
     AppendUid {
         /// UIDVALIDITY of destination mailbox
         uid_validity: NonZeroU32,
-        /// UID assigned to appended message in destination mailbox
-        uid: NonZeroU32,
+        /// UIDs assigned to the appended messages in destination mailbox,
+        /// in the order the messages were sent.
+        ///
+        /// A set rather than one number because RFC 4315 Section 3 has
+        /// `append-uid =/ uid-set` for `MULTIAPPEND`: one `APPEND` may
+        /// carry several messages and there is one response code for the
+        /// command, not one per message.
+        uid: UidSet,
     },
 
     /// Message(s) have been copied to destination mailbox with stated UID(s)
@@ -910,6 +925,15 @@ pub enum Code<'a> {
     },
 
     UidNotSticky,
+
+    /// The special use asked for on a `CREATE` cannot be given
+    /// (RFC 6154 Section 3).
+    ///
+    /// It is a refusal a client can act on rather than a sentence for a
+    /// person to read: it says the mailbox was not made *because of the
+    /// `USE`*, so a client may create it again without one instead of
+    /// telling its user the server said no.
+    UseAttr,
 
     /// IMAP4 Extension for Conditional STORE Operation (RFC 4551)
     /// A server supporting the persistent storage of mod-sequences for the mailbox
@@ -1095,8 +1119,32 @@ pub enum Capability<'a> {
     Binary,
     /// UIDPLUS extension (RFC 4351)
     UidPlus,
-    /// LIST-EXTENDED extension (RFC 5258)
+    /// ESEARCH extension (RFC 4731), which RFC 9051 Section 7.2.2 makes
+    /// mandatory for IMAP4rev2.
+    Esearch,
+    /// ESORT extension (RFC 5267 Section 4): the `RETURN` options of
+    /// ESEARCH, applied to `SORT`.
+    Esort,
+    /// MULTIAPPEND extension (RFC 3502).
+    MultiAppend,
+    /// LIST-EXTENDED extension (RFC 5258).
     ListExtended,
+    /// LIST-STATUS extension (RFC 5819): `LIST ... RETURN (STATUS ...)`.
+    ListStatus,
+    /// SPECIAL-USE extension (RFC 6154 Section 2): the server reports
+    /// `\\Sent`, `\\Drafts` and the rest in its `LIST` responses.
+    SpecialUse,
+    /// CREATE-SPECIAL-USE extension (RFC 6154 Section 3): the client may
+    /// say what a mailbox is for as it creates it.
+    CreateSpecialUse,
+    /// CATENATE extension (RFC 4469): an `APPEND` may name parts the
+    /// server already holds instead of sending them again.
+    Catenate,
+    /// CONTEXT=SEARCH extension (RFC 5267): `SEARCH RETURN (PARTIAL …)`,
+    /// and searches left open with `UPDATE`.
+    ContextSearch,
+    /// CONTEXT=SORT extension (RFC 5267): the same of `SORT`.
+    ContextSort,
     /// CONDSTORE extension (RFC 7162)
     #[cfg(feature = "ext_condstore_qresync")]
     CondStore,
@@ -1152,7 +1200,16 @@ impl Display for Capability<'_> {
             Self::MetadataServer => write!(f, "METADATA-SERVER"),
             Self::Binary => write!(f, "BINARY"),
             Self::UidPlus => write!(f, "UIDPLUS"),
+            Self::Esearch => write!(f, "ESEARCH"),
+            Self::Esort => write!(f, "ESORT"),
+            Self::MultiAppend => write!(f, "MULTIAPPEND"),
             Self::ListExtended => write!(f, "LIST-EXTENDED"),
+            Self::ListStatus => write!(f, "LIST-STATUS"),
+            Self::SpecialUse => write!(f, "SPECIAL-USE"),
+            Self::CreateSpecialUse => write!(f, "CREATE-SPECIAL-USE"),
+            Self::Catenate => write!(f, "CATENATE"),
+            Self::ContextSearch => write!(f, "CONTEXT=SEARCH"),
+            Self::ContextSort => write!(f, "CONTEXT=SORT"),
             #[cfg(feature = "ext_condstore_qresync")]
             Self::CondStore => write!(f, "CONDSTORE"),
             #[cfg(feature = "ext_condstore_qresync")]
@@ -1236,6 +1293,19 @@ impl<'a> From<Atom<'a>> for Capability<'a> {
             #[cfg(feature = "ext_status_size")]
             "status=size" => Self::StatusSize,
             "uidplus" => Self::UidPlus,
+            "esearch" => Self::Esearch,
+            "esort" => Self::Esort,
+            "multiappend" => Self::MultiAppend,
+            "list-extended" => Self::ListExtended,
+            "list-status" => Self::ListStatus,
+            "special-use" => Self::SpecialUse,
+            "create-special-use" => Self::CreateSpecialUse,
+            "catenate" => Self::Catenate,
+            // Before the "=" split below, as `STATUS=SIZE` is: RFC 5267
+            // registers two whole names, not a `CONTEXT=` family a
+            // client could be expected to guess at.
+            "context=search" => Self::ContextSearch,
+            "context=sort" => Self::ContextSort,
             #[cfg(feature = "ext_utf8")]
             "utf8=accept" => Self::Utf8(Utf8Kind::Accept),
             #[cfg(feature = "ext_utf8")]

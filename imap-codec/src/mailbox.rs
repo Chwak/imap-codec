@@ -30,6 +30,7 @@ use crate::{
         thread::thread_data,
     },
     flag::{flag_list, mbx_list_flags},
+    search::esearch_response,
     status::status_att_list,
 };
 
@@ -71,6 +72,7 @@ pub(crate) fn mailbox(input: &[u8]) -> IMAPResult<&[u8], Mailbox> {
 ///                                         ^^^^^^^^^^^^^^^^^^^^^^^^
 ///                                         |
 ///                                         RFC 7162 (edited)
+///                esearch-response /                       ; RFC 4731
 ///                "STATUS" SP mailbox SP "(" [status-att-list] ")" /
 ///                "METADATA" SP mailbox SP (entry-values / entry-list) / ; RFC 5464
 ///                number SP "EXISTS" /
@@ -152,6 +154,11 @@ pub(crate) fn mailbox_data(input: &[u8]) -> IMAPResult<&[u8], Data> {
             )),
             |(_, nums, modseq)| Data::Sort(nums, modseq),
         ),
+        // RFC 4731 Section 3.2 adds `esearch-response` to `mailbox-data`.
+        // It has to come before the `SEARCH` arm only in spirit — the two
+        // names differ — but it sits here because it answers the same
+        // command.
+        esearch_response,
         thread_data,
         map(
             tuple((
