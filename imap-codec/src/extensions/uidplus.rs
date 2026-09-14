@@ -19,7 +19,7 @@ use crate::{
     core::nz_number,
     decode::IMAPResult,
     encode::{EncodeContext, EncodeIntoContext, utils::join_serializable},
-    sequence::sequence_set,
+    sequence::sequence_set_or_saved,
 };
 
 /// ```abnf
@@ -27,7 +27,7 @@ use crate::{
 /// ```
 pub(crate) fn uid_expunge(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     map(
-        preceded(tag_no_case("UID EXPUNGE "), sequence_set),
+        preceded(tag_no_case("UID EXPUNGE "), sequence_set_or_saved),
         |sequence_set| CommandBody::ExpungeUid { sequence_set },
     )(input)
 }

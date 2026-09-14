@@ -61,7 +61,7 @@ use crate::{
     flag::{flag, flag_list},
     mailbox::{list_mailbox, list_patterns, list_return_opts, list_select_opts, mailbox},
     search::search,
-    sequence::sequence_set,
+    sequence::{sequence_set, sequence_set_or_saved},
     status::status_att,
 };
 
@@ -705,7 +705,7 @@ pub(crate) fn cancelupdate(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
 
 /// `copy = "COPY" SP sequence-set SP mailbox`
 pub(crate) fn copy(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
-    let mut parser = tuple((tag_no_case(b"COPY"), sp, sequence_set, sp, mailbox));
+    let mut parser = tuple((tag_no_case(b"COPY"), sp, sequence_set_or_saved, sp, mailbox));
 
     let (remaining, (_, _, sequence_set, _, mailbox)) = parser(input)?;
 
@@ -729,7 +729,7 @@ pub(crate) fn copy(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
 pub(crate) fn fetch(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     let mut parser = tuple((
         tag_no_case(b"FETCH"),
-        preceded(sp, sequence_set),
+        preceded(sp, sequence_set_or_saved),
         preceded(
             sp,
             alt((
@@ -831,7 +831,7 @@ pub(crate) fn fetch_modifier(input: &[u8]) -> IMAPResult<&[u8], FetchModifier> {
 pub(crate) fn store(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     let mut parser = tuple((
         tag_no_case(b"STORE"),
-        preceded(sp, sequence_set),
+        preceded(sp, sequence_set_or_saved),
         #[cfg(feature = "ext_condstore_qresync")]
         map(opt(store_modifiers), Option::unwrap_or_default),
         preceded(sp, store_att_flags),

@@ -200,8 +200,13 @@ pub(crate) fn resp_text_code(input: &[u8]) -> IMAPResult<&[u8], Code> {
         value(Code::UnknownCte, tag_no_case(b"UNKNOWN-CTE")),
         resp_code_apnd,
         resp_code_copy,
-        value(Code::UidNotSticky, tag_no_case(b"UIDNOTSTICKY")),
-        value(Code::UseAttr, tag_no_case(b"USEATTR")),
+        // Nested only because `alt` takes at most twenty-one choices.
+        alt((
+            value(Code::UidNotSticky, tag_no_case(b"UIDNOTSTICKY")),
+            value(Code::UseAttr, tag_no_case(b"USEATTR")),
+            // RFC 5182 Section 2.5.
+            value(Code::NotSaved, tag_no_case(b"NOTSAVED")),
+        )),
         #[cfg(feature = "ext_condstore_qresync")]
         alt((
             map(

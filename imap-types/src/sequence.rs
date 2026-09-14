@@ -106,6 +106,98 @@ impl SequenceSet {
     }
 }
 
+/// The messages a command names: a sequence set, or `$`.
+///
+/// RFC 5182 (SEARCHRES) lets `SEARCH ... RETURN (SAVE)` keep its result
+/// and a later command name it as `$`; RFC 9051 Section 6.4.4.1 makes that
+/// part of IMAP4rev2. `$` is a whole sequence set and never an element of
+/// one (`seq-last-command`), so it is a variant here and not a
+/// [`Sequence`]: `1,$` is not a thing a command can say.
+///
+/// Only where a *command* names messages. A response never carries `$`,
+/// and neither do the sets RFC 7162 sends (`MODIFIED`, `VANISHED`), so
+/// those keep [`SequenceSet`].
+///
+/// ```abnf
+/// sequence-set     =/ seq-last-command
+/// seq-last-command =  "$"
+/// ```
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub enum SequenceSetOrSaved {
+    /// Numbers and ranges.
+    Set(SequenceSet),
+    /// `$`: the result the last `SEARCH ... RETURN (SAVE)` in this mailbox
+    /// kept, or no messages when none did.
+    Saved,
+}
+
+impl From<SequenceSet> for SequenceSetOrSaved {
+    fn from(set: SequenceSet) -> Self {
+        Self::Set(set)
+    }
+}
+
+impl TryFrom<&str> for SequenceSetOrSaved {
+    type Error = ValidationError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value == "$" {
+            return Ok(Self::Saved);
+        }
+        Ok(Self::Set(value.parse()?))
+    }
+}
+
+macro_rules! impl_from_t_for_sequence_set_or_saved {
+    ($($thing:ty),*) => {$(
+        impl From<$thing> for SequenceSetOrSaved {
+            fn from(value: $thing) -> Self {
+                Self::Set(SequenceSet::from(value))
+            }
+        }
+    )*};
+}
+
+macro_rules! impl_try_from_t_for_sequence_set_or_saved {
+    ($($thing:ty),*) => {$(
+        impl TryFrom<$thing> for SequenceSetOrSaved {
+            type Error = ValidationError;
+
+            fn try_from(value: $thing) -> Result<Self, Self::Error> {
+                Ok(Self::Set(SequenceSet::try_from(value)?))
+            }
+        }
+    )*};
+}
+
+impl_from_t_for_sequence_set_or_saved!(
+    Sequence,
+    SeqOrUid,
+    NonZeroU32,
+    RangeFull,
+    RangeFrom<NonZeroU32>,
+    RangeToInclusive<NonZeroU32>,
+    RangeInclusive<NonZeroU32>
+);
+impl_try_from_t_for_sequence_set_or_saved!(
+    RangeTo<NonZeroU32>,
+    Range<NonZeroU32>,
+    Vec<Sequence>,
+    Vec<NonZeroU32>,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize
+);
+
 impl From<Sequence> for SequenceSet {
     fn from(sequence: Sequence) -> Self {
         Self(Vec1::from(sequence))

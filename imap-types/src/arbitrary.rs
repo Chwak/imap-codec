@@ -23,7 +23,7 @@ use crate::{
         Status, StatusBody, StatusKind, Tagged,
     },
     search::SearchKey,
-    sequence::SequenceSet,
+    sequence::SequenceSetOrSaved,
 };
 #[cfg(not(feature = "arbitrary_simplified"))]
 use crate::{body::MultiPartExtensionData, envelope::Envelope};
@@ -259,7 +259,7 @@ fn arbitrary_search_key_limited<'a>(
                 Vec1::from(arbitrary_search_key_leaf(u)?)
             }
         }),
-        1 => SearchKey::SequenceSet(SequenceSet::arbitrary(u)?),
+        1 => SearchKey::SequenceSet(SequenceSetOrSaved::arbitrary(u)?),
         2 => SearchKey::All,
         3 => SearchKey::Answered,
         4 => SearchKey::Bcc(AString::arbitrary(u)?),
@@ -291,7 +291,7 @@ fn arbitrary_search_key_limited<'a>(
         27 => SearchKey::Subject(AString::arbitrary(u)?),
         28 => SearchKey::Text(AString::arbitrary(u)?),
         29 => SearchKey::To(AString::arbitrary(u)?),
-        30 => SearchKey::Uid(SequenceSet::arbitrary(u)?),
+        30 => SearchKey::Uid(SequenceSetOrSaved::arbitrary(u)?),
         31 => SearchKey::Unanswered,
         32 => SearchKey::Undeleted,
         33 => SearchKey::Undraft,
@@ -309,7 +309,7 @@ fn arbitrary_search_key_limited<'a>(
 
 fn arbitrary_search_key_leaf<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<SearchKey<'a>> {
     Ok(match u.int_in_range(0u8..=33)? {
-        0 => SearchKey::SequenceSet(SequenceSet::arbitrary(u)?),
+        0 => SearchKey::SequenceSet(SequenceSetOrSaved::arbitrary(u)?),
         1 => SearchKey::All,
         2 => SearchKey::Answered,
         3 => SearchKey::Bcc(AString::arbitrary(u)?),
@@ -336,7 +336,7 @@ fn arbitrary_search_key_leaf<'a>(u: &mut Unstructured<'a>) -> arbitrary::Result<
         24 => SearchKey::Subject(AString::arbitrary(u)?),
         25 => SearchKey::Text(AString::arbitrary(u)?),
         26 => SearchKey::To(AString::arbitrary(u)?),
-        27 => SearchKey::Uid(SequenceSet::arbitrary(u)?),
+        27 => SearchKey::Uid(SequenceSetOrSaved::arbitrary(u)?),
         28 => SearchKey::Unanswered,
         29 => SearchKey::Undeleted,
         30 => SearchKey::Undraft,

@@ -22,7 +22,7 @@ use crate::{
     decode::{IMAPErrorKind, IMAPParseError, IMAPResult},
     extensions::uidplus::uid_set,
     fetch::header_fld_name,
-    sequence::sequence_set,
+    sequence::sequence_set_or_saved,
 };
 
 /// `search = "SEARCH" [search-return-opts] [SP "CHARSET" SP charset] 1*(SP search-key)`
@@ -100,6 +100,8 @@ pub(crate) fn search_return_opt(input: &[u8]) -> IMAPResult<&[u8], SearchReturnO
         ),
         value(SearchReturnOption::Update, tag_no_case(b"UPDATE")),
         value(SearchReturnOption::Context, tag_no_case(b"CONTEXT")),
+        // RFC 5182 Section 3.
+        value(SearchReturnOption::Save, tag_no_case(b"SAVE")),
     ))(input)
 }
 
@@ -278,7 +280,7 @@ fn search_key_limited(input: &[u8], remaining_recursion: usize) -> IMAPResult<&[
                 |(_, _, val)| SearchKey::Smaller(val),
             ),
             map(
-                tuple((tag_no_case(b"UID"), sp, sequence_set)),
+                tuple((tag_no_case(b"UID"), sp, sequence_set_or_saved)),
                 |(_, _, val)| SearchKey::Uid(val),
             ),
             value(SearchKey::Undraft, tag_no_case(b"UNDRAFT")),
@@ -286,7 +288,7 @@ fn search_key_limited(input: &[u8], remaining_recursion: usize) -> IMAPResult<&[
             map(search_modsequence, |(entry, modseq)| {
                 SearchKey::ModSequence { entry, modseq }
             }),
-            map(sequence_set, SearchKey::SequenceSet),
+            map(sequence_set_or_saved, SearchKey::SequenceSet),
             map(
                 delimited(tag(b"("), separated_list1(sp, search_key), tag(b")")),
                 |val| SearchKey::And(Vec1::unvalidated(val)),
@@ -449,7 +451,8 @@ mod tests {
                     vec![Single(Value(5.try_into().unwrap()))]
                         .try_into()
                         .unwrap()
-                ))))),
+                )
+                .into())))),
                 uid: false,
             }
         );
@@ -463,24 +466,28 @@ mod tests {
                     vec![Single(Value(5.try_into().unwrap()))]
                         .try_into()
                         .unwrap(),
-                )),
+                )
+                .into()),
                 Or(
                     Box::new(Uid(SequenceSetData(
                         vec![Single(Value(5.try_into().unwrap()))]
                             .try_into()
                             .unwrap(),
-                    ))),
+                    )
+                    .into())),
                     Box::new(And(vec![
                         Uid(SequenceSetData(
                             vec![Single(Value(1.try_into().unwrap()))]
                                 .try_into()
                                 .unwrap(),
-                        )),
+                        )
+                        .into()),
                         Uid(SequenceSetData(
                             vec![Single(Value(2.try_into().unwrap()))]
                                 .try_into()
                                 .unwrap(),
-                        )),
+                        )
+                        .into()),
                     ]
                     .try_into()
                     .unwrap())),
@@ -489,7 +496,8 @@ mod tests {
                     vec![Single(Value(5.try_into().unwrap()))]
                         .try_into()
                         .unwrap(),
-                )))),
+                )
+                .into()))),
             ]
             .try_into()
             .unwrap())),
@@ -518,7 +526,7 @@ mod tests {
                 b"(ANSWERED SEEN)".as_ref(),
             ),
             (
-                SearchKey::SequenceSet(SequenceSet::try_from(1).unwrap()),
+                SearchKey::SequenceSet(SequenceSet::try_from(1).unwrap().into()),
                 b"1",
             ),
             (SearchKey::All, b"ALL"),
@@ -601,7 +609,7 @@ mod tests {
             (SearchKey::Text(AString::try_from("A").unwrap()), b"TEXT A"),
             (SearchKey::To(AString::try_from("A").unwrap()), b"TO A"),
             (
-                SearchKey::Uid(SequenceSet::from(Sequence::try_from(1..).unwrap())),
+                SearchKey::Uid(SequenceSet::from(Sequence::try_from(1..).unwrap()).into()),
                 b"UID 1:*",
             ),
             (SearchKey::Unanswered, b"UNANSWERED"),

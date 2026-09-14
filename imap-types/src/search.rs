@@ -16,7 +16,7 @@ use crate::{
     core::{AString, Atom, Tag, Vec1},
     datetime::NaiveDate,
     extensions::uidplus::UidSet,
-    sequence::SequenceSet,
+    sequence::{SequenceSet, SequenceSetOrSaved},
 };
 
 /// The defined search keys.
@@ -38,7 +38,7 @@ pub enum SearchKey<'a> {
 
     /// Messages with message sequence numbers corresponding to the
     /// specified message sequence number set.
-    SequenceSet(SequenceSet),
+    SequenceSet(SequenceSetOrSaved),
 
     /// All messages in the mailbox; the default initial key for ANDing.
     All,
@@ -149,7 +149,7 @@ pub enum SearchKey<'a> {
 
     /// Messages with unique identifiers corresponding to the specified
     /// unique identifier set.  Sequence set ranges are permitted.
-    Uid(SequenceSet),
+    Uid(SequenceSetOrSaved),
 
     /// Messages that do not have the \Answered flag set.
     Unanswered,
@@ -182,7 +182,7 @@ impl SearchKey<'_> {
     where
         S: Into<SequenceSet>,
     {
-        Self::Uid(sequence_set.into())
+        Self::Uid(SequenceSetOrSaved::Set(sequence_set.into()))
     }
 }
 
@@ -226,6 +226,9 @@ pub enum SearchReturnOption {
     /// `PARTIAL` asks for a slice of the same answer rather than of a
     /// search run again over a mailbox that has moved on.
     Context,
+    /// `SAVE` (RFC 5182 Section 2.1): keep the result, so a later command
+    /// names it as `$` instead of carrying it back across the wire.
+    Save,
 }
 
 impl AsRef<str> for SearchReturnOption {
@@ -238,6 +241,7 @@ impl AsRef<str> for SearchReturnOption {
             SearchReturnOption::Partial(_) => "PARTIAL",
             SearchReturnOption::Update => "UPDATE",
             SearchReturnOption::Context => "CONTEXT",
+            SearchReturnOption::Save => "SAVE",
         }
     }
 }

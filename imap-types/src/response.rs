@@ -943,6 +943,10 @@ pub enum Code<'a> {
     /// telling its user the server said no.
     UseAttr,
 
+    /// The server did not keep a `SEARCH ... RETURN (SAVE)` result
+    /// (RFC 5182 Section 2.5), and `$` is not what the search found.
+    NotSaved,
+
     /// IMAP4 Extension for Conditional STORE Operation (RFC 4551)
     /// A server supporting the persistent storage of mod-sequences for the mailbox
     /// MUST send the OK untagged response including HIGHESTMODSEQ response

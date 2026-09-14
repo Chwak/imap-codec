@@ -60,14 +60,17 @@ fn create_complex() -> Command<'static> {
         Tag::unvalidated("A"),
         CommandBody::search(
             Some(Charset::try_from("UTF-8").unwrap()),
-            Vec1::try_from(vec![SearchKey::SequenceSet(SequenceSet(
-                Vec1::try_from(vec![
-                    Sequence::try_from("1:42").unwrap(),
-                    Sequence::try_from("42:1337").unwrap(),
-                    Sequence::try_from("1337:*").unwrap(),
-                ])
-                .unwrap(),
-            ))])
+            Vec1::try_from(vec![SearchKey::SequenceSet(
+                SequenceSet(
+                    Vec1::try_from(vec![
+                        Sequence::try_from("1:42").unwrap(),
+                        Sequence::try_from("42:1337").unwrap(),
+                        Sequence::try_from("1337:*").unwrap(),
+                    ])
+                    .unwrap(),
+                )
+                .into(),
+            )])
             .unwrap(),
             true,
         ),

@@ -4,13 +4,13 @@ use abnf_core::streaming::sp;
 use imap_types::command::CommandBody;
 use nom::{bytes::streaming::tag_no_case, sequence::tuple};
 
-use crate::{decode::IMAPResult, mailbox::mailbox, sequence::sequence_set};
+use crate::{decode::IMAPResult, mailbox::mailbox, sequence::sequence_set_or_saved};
 
 /// ```abnf
 /// move = "MOVE" SP sequence-set SP mailbox
 /// ```
 pub(crate) fn r#move(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
-    let mut parser = tuple((tag_no_case(b"MOVE"), sp, sequence_set, sp, mailbox));
+    let mut parser = tuple((tag_no_case(b"MOVE"), sp, sequence_set_or_saved, sp, mailbox));
 
     let (remaining, (_, _, sequence_set, _, mailbox)) = parser(input)?;
 

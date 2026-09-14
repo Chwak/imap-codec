@@ -80,7 +80,7 @@ use imap_types::{
         Response, Status, StatusBody, StatusKind, Tagged,
     },
     search::{EsearchResponse, PartialRange, SearchKey, SearchReturnData, SearchReturnOption},
-    sequence::{SeqOrUid, Sequence, SequenceSet},
+    sequence::{SeqOrUid, Sequence, SequenceSet, SequenceSetOrSaved},
     status::{StatusDataItem, StatusDataItemName},
     utils::escape_quoted,
 };
@@ -1114,6 +1114,15 @@ impl EncodeIntoContext for SearchKey<'_> {
     }
 }
 
+impl EncodeIntoContext for SequenceSetOrSaved {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        match self {
+            SequenceSetOrSaved::Set(set) => set.encode_ctx(ctx),
+            SequenceSetOrSaved::Saved => ctx.write_all(b"$"),
+        }
+    }
+}
+
 impl EncodeIntoContext for SequenceSet {
     fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
         #[cfg(feature = "quirk_always_normalize_sequence_sets")]
@@ -1503,6 +1512,7 @@ impl EncodeIntoContext for Code<'_> {
             }
             Code::UidNotSticky => ctx.write_all(b"UIDNOTSTICKY"),
             Code::UseAttr => ctx.write_all(b"USEATTR"),
+            Code::NotSaved => ctx.write_all(b"NOTSAVED"),
             Code::Other(unknown) => unknown.encode_ctx(ctx),
         }
     }

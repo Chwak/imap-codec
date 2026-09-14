@@ -32,7 +32,7 @@ use crate::{
     mailbox::{ListMailbox, ListPatterns, ListReturnOption, ListSelectOption, Mailbox, MailboxUse},
     search::{SearchKey, SearchReturnOption},
     secret::Secret,
-    sequence::SequenceSet,
+    sequence::{SequenceSet, SequenceSetOrSaved},
     status::StatusDataItemName,
 };
 
@@ -1137,7 +1137,7 @@ pub enum CommandBody<'a> {
     ///
     /// Alternatively, the client may fall back to using just the EXPUNGE
     /// command, risking the unintended removal of some messages.
-    ExpungeUid { sequence_set: SequenceSet },
+    ExpungeUid { sequence_set: SequenceSetOrSaved },
 
     /// ### 6.4.4.  SEARCH Command
     ///
@@ -1287,8 +1287,8 @@ pub enum CommandBody<'a> {
     ///   message when it already knows the envelope, it can
     ///   safely ignore the newly transmitted envelope.
     Fetch {
-        /// Set of messages.
-        sequence_set: SequenceSet,
+        /// Set of messages, or `$` (RFC 5182).
+        sequence_set: SequenceSetOrSaved,
         /// Message data items (or a macro).
         macro_or_item_names: MacroOrMessageDataItemNames<'a>,
         /// Use UID variant.
@@ -1348,8 +1348,8 @@ pub enum CommandBody<'a> {
     /// -FLAGS.SILENT \<flag list\>
     ///    Equivalent to -FLAGS, but without returning a new value.
     Store {
-        /// Set of messages.
-        sequence_set: SequenceSet,
+        /// Set of messages, or `$` (RFC 5182).
+        sequence_set: SequenceSetOrSaved,
         /// Kind of storage, i.e., replace, add, or remove.
         kind: StoreType,
         /// Kind of response, i.e., answer or silent.
@@ -1390,8 +1390,8 @@ pub enum CommandBody<'a> {
     /// implementations MUST restore the destination mailbox to its state
     /// before the COPY attempt.
     Copy {
-        /// Set of messages.
-        sequence_set: SequenceSet,
+        /// Set of messages, or `$` (RFC 5182).
+        sequence_set: SequenceSetOrSaved,
         /// Destination mailbox.
         mailbox: Mailbox<'a>,
         /// Use UID variant.
@@ -1634,8 +1634,8 @@ pub enum CommandBody<'a> {
     /// This extension must only be used when the server advertised support for it sending the MOVE capability.
     /// </div>
     Move {
-        /// Set of messages.
-        sequence_set: SequenceSet,
+        /// Set of messages, or `$` (RFC 5182).
+        sequence_set: SequenceSetOrSaved,
         /// Destination mailbox.
         mailbox: Mailbox<'a>,
         /// Use UID variant.
@@ -1900,7 +1900,7 @@ impl<'a> CommandBody<'a> {
         let sequence_set = sequence_set.try_into()?;
 
         Ok(CommandBody::Fetch {
-            sequence_set,
+            sequence_set: sequence_set.into(),
             macro_or_item_names: macro_or_item_names.into(),
             uid,
             #[cfg(feature = "ext_condstore_qresync")]
@@ -1922,7 +1922,7 @@ impl<'a> CommandBody<'a> {
         let sequence_set = sequence_set.try_into()?;
 
         Ok(CommandBody::Store {
-            sequence_set,
+            sequence_set: sequence_set.into(),
             kind,
             response,
             flags,
@@ -1943,7 +1943,7 @@ impl<'a> CommandBody<'a> {
         M: TryInto<Mailbox<'a>>,
     {
         Ok(CommandBody::Copy {
-            sequence_set: sequence_set.try_into().map_err(CopyError::Sequence)?,
+            sequence_set: sequence_set.try_into().map_err(CopyError::Sequence)?.into(),
             mailbox: mailbox.try_into().map_err(CopyError::Mailbox)?,
             uid,
         })
@@ -2100,7 +2100,7 @@ mod tests {
         mailbox::{ListMailbox, ListPatterns, Mailbox},
         search::SearchKey,
         secret::Secret,
-        sequence::{SeqOrUid, Sequence, SequenceSet},
+        sequence::{SeqOrUid, Sequence, SequenceSet, SequenceSetOrSaved},
         status::StatusDataItemName,
     };
 
@@ -2205,10 +2205,12 @@ mod tests {
             CommandBody::search(
                 None,
                 Vec1::from(SearchKey::And(
-                    vec![SearchKey::SequenceSet(SequenceSet(
-                        vec![Sequence::Single(SeqOrUid::Value(42.try_into().unwrap()))]
-                            .try_into()
-                            .unwrap(),
+                    vec![SearchKey::SequenceSet(SequenceSetOrSaved::Set(
+                        SequenceSet(
+                            vec![Sequence::Single(SeqOrUid::Value(42.try_into().unwrap()))]
+                                .try_into()
+                                .unwrap(),
+                        ),
                     ))]
                     .try_into()
                     .unwrap(),
@@ -2418,7 +2420,7 @@ mod tests {
             ),
             (
                 CommandBody::Fetch {
-                    sequence_set: SequenceSet::try_from(1u32).unwrap(),
+                    sequence_set: SequenceSetOrSaved::try_from(1u32).unwrap(),
                     macro_or_item_names: MacroOrMessageDataItemNames::Macro(Macro::Full),
                     uid: true,
                     #[cfg(feature = "ext_condstore_qresync")]
@@ -2428,7 +2430,7 @@ mod tests {
             ),
             (
                 CommandBody::Store {
-                    sequence_set: SequenceSet::try_from(1).unwrap(),
+                    sequence_set: SequenceSetOrSaved::try_from(1).unwrap(),
                     flags: vec![],
                     response: StoreResponse::Silent,
                     kind: StoreType::Add,
@@ -2440,7 +2442,7 @@ mod tests {
             ),
             (
                 CommandBody::Copy {
-                    sequence_set: SequenceSet::try_from(1).unwrap(),
+                    sequence_set: SequenceSetOrSaved::try_from(1).unwrap(),
                     mailbox: Mailbox::Inbox,
                     uid: true,
                 },
@@ -2481,7 +2483,7 @@ mod tests {
             ),
             (
                 CommandBody::Move {
-                    sequence_set: SequenceSet::try_from(1).unwrap(),
+                    sequence_set: SequenceSetOrSaved::try_from(1).unwrap(),
                     mailbox: Mailbox::Inbox,
                     uid: true,
                 },
