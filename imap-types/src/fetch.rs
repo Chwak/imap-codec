@@ -260,6 +260,20 @@ pub enum MessageDataItemName<'a> {
     /// THREADID
     /// ```
     ThreadId,
+
+    /// A short plain-text preview of the message (RFC 8970 Section 3).
+    ///
+    /// `lazy` is the `LAZY` modifier: the server may answer `NIL` rather
+    /// than make the client wait while it works a preview out.
+    ///
+    /// ```imap
+    /// PREVIEW
+    /// PREVIEW (LAZY)
+    /// ```
+    Preview {
+        /// `PREVIEW (LAZY)`.
+        lazy: bool,
+    },
 }
 
 /// Message data item.
@@ -408,6 +422,11 @@ pub enum MessageDataItem<'a> {
     /// `THREADID (objectid)`, or `THREADID NIL` from a server that does not
     /// thread (RFC 8474 Section 5.2).
     ThreadId(Option<ObjectId<'a>>),
+
+    /// `PREVIEW nstring` (RFC 8970 Section 3.2): the preview, an empty
+    /// string when there is nothing to show, or `NIL` when `LAZY` let the
+    /// server leave it for later.
+    Preview(NString<'a>),
 }
 
 /// A part specifier is either a part number or one of the following:

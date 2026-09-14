@@ -84,6 +84,24 @@ mod tests {
         );
     }
 
+    /// RFC 8970 Section 3's commands and answers.
+    #[test]
+    fn test_preview_round_trips() {
+        // One item is written without its parentheses, as for any item.
+        round_trip_command(b"A1 FETCH 1 PREVIEW\r\n");
+        round_trip_command(b"A4 FETCH 1 PREVIEW (LAZY)\r\n");
+        round_trip_command(b"A2 FETCH 1:3 (UID PREVIEW (LAZY))\r\n");
+        round_trip_response(b"* 1 FETCH (PREVIEW \"Hello, this is a preview\")\r\n");
+        round_trip_response(b"* 2 FETCH (UID 4 PREVIEW NIL)\r\n");
+        round_trip_response(b"* 3 FETCH (PREVIEW \"\")\r\n");
+        assert!(
+            CommandCodec::default()
+                .decode(b"A3 FETCH 1 (PREVIEW (FAST))\r\n")
+                .is_err(),
+            "LAZY is the only modifier"
+        );
+    }
+
     /// RFC 8437 Section 2.
     #[test]
     fn test_unauthenticate_round_trips() {

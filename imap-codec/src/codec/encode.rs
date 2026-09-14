@@ -1268,6 +1268,8 @@ impl EncodeIntoContext for MessageDataItemName<'_> {
             MessageDataItemName::ModSeq => ctx.write_all(b"MODSEQ"),
             MessageDataItemName::EmailId => ctx.write_all(b"EMAILID"),
             MessageDataItemName::ThreadId => ctx.write_all(b"THREADID"),
+            MessageDataItemName::Preview { lazy: false } => ctx.write_all(b"PREVIEW"),
+            MessageDataItemName::Preview { lazy: true } => ctx.write_all(b"PREVIEW (LAZY)"),
         }
     }
 }
@@ -2064,6 +2066,10 @@ impl EncodeIntoContext for MessageDataItem<'_> {
             Self::EmailId(id) => write!(ctx, "EMAILID ({id})"),
             Self::ThreadId(Some(id)) => write!(ctx, "THREADID ({id})"),
             Self::ThreadId(None) => ctx.write_all(b"THREADID NIL"),
+            Self::Preview(preview) => {
+                ctx.write_all(b"PREVIEW ")?;
+                preview.encode_ctx(ctx)
+            }
         }
     }
 }

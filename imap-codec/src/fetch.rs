@@ -121,6 +121,25 @@ pub(crate) fn fetch_att(input: &[u8]) -> IMAPResult<&[u8], MessageDataItemName> 
         // RFC 8474 Section 7.
         value(MessageDataItemName::EmailId, tag_no_case(b"EMAILID")),
         value(MessageDataItemName::ThreadId, tag_no_case(b"THREADID")),
+        // RFC 8970 Section 6:
+        //   fetch-att   =/ "PREVIEW" [SP "(" preview-mod *(SP preview-mod) ")"]
+        //   preview-mod =  "LAZY"
+        map(
+            preceded(
+                tag_no_case(b"PREVIEW"),
+                opt(preceded(
+                    sp,
+                    delimited(
+                        tag(b"("),
+                        separated_list1(sp, tag_no_case(b"LAZY")),
+                        tag(b")"),
+                    ),
+                )),
+            ),
+            |modifiers| MessageDataItemName::Preview {
+                lazy: modifiers.is_some(),
+            },
+        ),
     ))(input)
 }
 
@@ -162,11 +181,17 @@ pub(crate) fn msg_att_dynamic(input: &[u8]) -> IMAPResult<&[u8], MessageDataItem
         MessageDataItem::ModSeq,
     );
 
+    // RFC 8970 Section 6: `msg-att-dynamic =/ "PREVIEW" SP nstring`.
+    let preview = map(
+        preceded(tag_no_case(b"PREVIEW "), nstring),
+        MessageDataItem::Preview,
+    );
+
     #[cfg(feature = "ext_condstore_qresync")]
-    let mut parser = alt((flags, modseq));
+    let mut parser = alt((flags, modseq, preview));
 
     #[cfg(not(feature = "ext_condstore_qresync"))]
-    let mut parser = flags;
+    let mut parser = alt((flags, preview));
 
     let (remaining, item) = parser(input)?;
 
