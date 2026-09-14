@@ -478,6 +478,10 @@ pub enum CommandBody<'a> {
         parameters: Vec<SelectParameter>,
     },
 
+    /// `UNAUTHENTICATE` (RFC 8437): back to the not-authenticated state,
+    /// keeping the connection and its TLS.
+    Unauthenticate,
+
     /// Unselect a mailbox.
     ///
     /// This should bring the client back to the AUTHENTICATED state.
@@ -1963,6 +1967,7 @@ impl<'a> CommandBody<'a> {
             Self::Sort { .. } => "SORT",
             Self::Thread { .. } => "THREAD",
             Self::Unselect => "UNSELECT",
+            Self::Unauthenticate => "UNAUTHENTICATE",
             Self::CancelUpdate { .. } => "CANCELUPDATE",
             Self::Examine { .. } => "EXAMINE",
             Self::Create { .. } => "CREATE",

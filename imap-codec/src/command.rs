@@ -41,6 +41,8 @@ use crate::extensions::id::id;
 use crate::extensions::metadata::{getmetadata, setmetadata};
 #[cfg(feature = "ext_namespace")]
 use crate::extensions::namespace::namespace_command;
+#[cfg(feature = "ext_condstore_qresync")]
+use crate::sequence::sequence_set;
 use crate::{
     auth::auth_type,
     core::{astring, atom, base64, literal, tag_imap},
@@ -61,7 +63,7 @@ use crate::{
     flag::{flag, flag_list},
     mailbox::{list_mailbox, list_patterns, list_return_opts, list_select_opts, mailbox},
     search::search,
-    sequence::{sequence_set, sequence_set_or_saved},
+    sequence::sequence_set_or_saved,
     status::status_att,
 };
 
@@ -173,6 +175,9 @@ pub(crate) fn command_auth(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
         getmetadata,
         #[cfg(feature = "ext_namespace")]
         namespace_command,
+        // RFC 8437 Section 2: valid in the authenticated and selected
+        // states, which this rule covers since `command` tries it in both.
+        value(CommandBody::Unauthenticate, tag_no_case(b"UNAUTHENTICATE")),
     ))(input)
 }
 

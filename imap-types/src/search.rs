@@ -15,6 +15,7 @@ use crate::extensions::condstore_qresync::{AttributeFlag, EntryTypeReq};
 use crate::{
     core::{AString, Atom, Tag, Vec1},
     datetime::NaiveDate,
+    extensions::objectid::ObjectId,
     extensions::uidplus::UidSet,
     sequence::{SequenceSet, SequenceSetOrSaved},
 };
@@ -175,6 +176,14 @@ pub enum SearchKey<'a> {
         entry: Option<(AttributeFlag<'a>, EntryTypeReq)>,
         modseq: u64,
     },
+
+    /// `EMAILID objectid` (RFC 8474 Section 6): the message with this
+    /// object identifier.
+    EmailId(ObjectId<'a>),
+
+    /// `THREADID objectid` (RFC 8474 Section 6): the messages of this
+    /// thread.
+    ThreadId(ObjectId<'a>),
 }
 
 impl SearchKey<'_> {

@@ -346,6 +346,7 @@ impl EncodeIntoContext for CommandBody<'_> {
                 Ok(())
             }
             CommandBody::Unselect => ctx.write_all(b"UNSELECT"),
+            CommandBody::Unauthenticate => ctx.write_all(b"UNAUTHENTICATE"),
             CommandBody::CancelUpdate { tags } => {
                 ctx.write_all(b"CANCELUPDATE")?;
                 // RFC 5267 Section 4.5 writes each tag as a
@@ -952,6 +953,7 @@ impl EncodeIntoContext for StatusDataItemName {
             Self::Size => ctx.write_all(b"SIZE"),
             #[cfg(feature = "ext_condstore_qresync")]
             Self::HighestModSeq => ctx.write_all(b"HIGHESTMODSEQ"),
+            Self::MailboxId => ctx.write_all(b"MAILBOXID"),
         }
     }
 }
@@ -1094,6 +1096,8 @@ impl EncodeIntoContext for SearchKey<'_> {
                 sequence_set.encode_ctx(ctx)
             }
             SearchKey::Undraft => ctx.write_all(b"UNDRAFT"),
+            SearchKey::EmailId(id) => write!(ctx, "EMAILID {id}"),
+            SearchKey::ThreadId(id) => write!(ctx, "THREADID {id}"),
             #[cfg(feature = "ext_condstore_qresync")]
             SearchKey::ModSequence { entry, modseq } => {
                 ctx.write_all(b"MODSEQ")?;
@@ -1262,6 +1266,8 @@ impl EncodeIntoContext for MessageDataItemName<'_> {
             }
             #[cfg(feature = "ext_condstore_qresync")]
             MessageDataItemName::ModSeq => ctx.write_all(b"MODSEQ"),
+            MessageDataItemName::EmailId => ctx.write_all(b"EMAILID"),
+            MessageDataItemName::ThreadId => ctx.write_all(b"THREADID"),
         }
     }
 }
@@ -1513,6 +1519,7 @@ impl EncodeIntoContext for Code<'_> {
             Code::UidNotSticky => ctx.write_all(b"UIDNOTSTICKY"),
             Code::UseAttr => ctx.write_all(b"USEATTR"),
             Code::NotSaved => ctx.write_all(b"NOTSAVED"),
+            Code::MailboxId(id) => write!(ctx, "MAILBOXID ({id})"),
             Code::Other(unknown) => unknown.encode_ctx(ctx),
         }
     }
@@ -1969,6 +1976,7 @@ impl EncodeIntoContext for StatusDataItem {
                 ctx.write_all(b"SIZE ")?;
                 octets.encode_ctx(ctx)
             }
+            Self::MailboxId(id) => write!(ctx, "MAILBOXID ({id})"),
             #[cfg(feature = "ext_condstore_qresync")]
             Self::HighestModSeq(value) => {
                 ctx.write_all(b"HIGHESTMODSEQ ")?;
@@ -2053,6 +2061,9 @@ impl EncodeIntoContext for MessageDataItem<'_> {
             // rejects, which is why a server could not advertise CONDSTORE.
             #[cfg(feature = "ext_condstore_qresync")]
             Self::ModSeq(value) => write!(ctx, "MODSEQ ({value})"),
+            Self::EmailId(id) => write!(ctx, "EMAILID ({id})"),
+            Self::ThreadId(Some(id)) => write!(ctx, "THREADID ({id})"),
+            Self::ThreadId(None) => ctx.write_all(b"THREADID NIL"),
         }
     }
 }

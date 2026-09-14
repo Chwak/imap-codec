@@ -18,11 +18,14 @@ use nom::{
 use crate::extensions::condstore_qresync::mod_sequence_value;
 use crate::{
     body::body,
-    core::{astring, nstring, number, nz_number},
+    core::{astring, nil, nstring, number, nz_number},
     datetime::date_time,
     decode::IMAPResult,
     envelope::envelope,
-    extensions::binary::{literal8, partial, section_binary},
+    extensions::{
+        binary::{literal8, partial, section_binary},
+        objectid::objectid,
+    },
     flag::flag_fetch,
 };
 
@@ -115,6 +118,9 @@ pub(crate) fn fetch_att(input: &[u8]) -> IMAPResult<&[u8], MessageDataItemName> 
         value(MessageDataItemName::Rfc822, tag_no_case(b"RFC822")),
         #[cfg(feature = "ext_condstore_qresync")]
         value(MessageDataItemName::ModSeq, tag_no_case(b"MODSEQ")),
+        // RFC 8474 Section 7.
+        value(MessageDataItemName::EmailId, tag_no_case(b"EMAILID")),
+        value(MessageDataItemName::ThreadId, tag_no_case(b"THREADID")),
     ))(input)
 }
 
@@ -247,6 +253,21 @@ pub(crate) fn msg_att_static(input: &[u8]) -> IMAPResult<&[u8], MessageDataItem>
         map(
             tuple((tag_no_case(b"BINARY.SIZE"), section_binary, sp, number)),
             |(_, section, _, size)| MessageDataItem::BinarySize { section, size },
+        ),
+        // RFC 8474 Section 7: fetch-emailid-resp and fetch-threadid-resp.
+        map(
+            delimited(tag_no_case(b"EMAILID ("), objectid, tag(b")")),
+            MessageDataItem::EmailId,
+        ),
+        map(
+            preceded(
+                tag_no_case(b"THREADID "),
+                alt((
+                    map(delimited(tag(b"("), objectid, tag(b")")), Some),
+                    value(None, nil),
+                )),
+            ),
+            MessageDataItem::ThreadId,
         ),
     ))(input)
 }

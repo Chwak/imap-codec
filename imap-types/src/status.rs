@@ -6,6 +6,8 @@ use bounded_static_derive::ToStatic;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::extensions::objectid::ObjectId;
+
 /// Status data item name used to request a status data item.
 #[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -44,6 +46,9 @@ pub enum StatusDataItemName {
     #[cfg(feature = "ext_condstore_qresync")]
     #[cfg_attr(docsrs, doc(cfg(feature = "ext_condstore_qresync")))]
     HighestModSeq,
+
+    /// The mailbox's object identifier (RFC 8474 Section 4.3).
+    MailboxId,
 }
 
 /// Status data item.
@@ -88,4 +93,7 @@ pub enum StatusDataItem {
     /// If the server doesn't support the persistent storage of mod-sequences for the mailbox (see
     /// Section 3.1.2.2), the server MUST return 0 as the value of the HIGHESTMODSEQ status data item.
     HighestModSeq(u64),
+
+    /// `MAILBOXID (objectid)` (RFC 8474 Section 4.3).
+    MailboxId(ObjectId<'static>),
 }

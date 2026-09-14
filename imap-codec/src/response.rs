@@ -29,6 +29,7 @@ use crate::extensions::metadata::metadata_code;
 use crate::{
     core::{atom, charset, nz_number, tag_imap, text},
     decode::IMAPResult,
+    extensions::objectid::objectid,
     extensions::{
         enable::enable_data,
         uidplus::{resp_code_apnd, resp_code_copy},
@@ -206,6 +207,11 @@ pub(crate) fn resp_text_code(input: &[u8]) -> IMAPResult<&[u8], Code> {
             value(Code::UseAttr, tag_no_case(b"USEATTR")),
             // RFC 5182 Section 2.5.
             value(Code::NotSaved, tag_no_case(b"NOTSAVED")),
+            // RFC 8474 Section 7.
+            map(
+                delimited(tag_no_case(b"MAILBOXID ("), objectid, tag(b")")),
+                Code::MailboxId,
+            ),
         )),
         #[cfg(feature = "ext_condstore_qresync")]
         alt((

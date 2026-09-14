@@ -1,12 +1,17 @@
 use abnf_core::streaming::sp;
-use imap_types::status::{StatusDataItem, StatusDataItemName};
+use imap_types::{
+    extensions::objectid::ObjectId,
+    status::{StatusDataItem, StatusDataItemName},
+};
 use nom::{
     branch::alt,
-    bytes::streaming::tag_no_case,
+    bytes::streaming::{tag, tag_no_case},
     combinator::{map, value},
     multi::separated_list1,
-    sequence::preceded,
+    sequence::{delimited, preceded},
 };
+
+use crate::extensions::objectid::objectid;
 
 #[cfg(feature = "ext_condstore_qresync")]
 use crate::extensions::condstore_qresync::mod_sequence_valzer;
@@ -41,6 +46,8 @@ pub(crate) fn status_att(input: &[u8]) -> IMAPResult<&[u8], StatusDataItemName> 
             StatusDataItemName::HighestModSeq,
             tag_no_case(b"HIGHESTMODSEQ"),
         ),
+        // RFC 8474 Section 7.
+        value(StatusDataItemName::MailboxId, tag_no_case(b"MAILBOXID")),
     ))(input)
 }
 
@@ -100,6 +107,11 @@ fn status_att_val(input: &[u8]) -> IMAPResult<&[u8], StatusDataItem> {
         map(
             preceded(tag_no_case(b"HIGHESTMODSEQ "), mod_sequence_valzer),
             StatusDataItem::HighestModSeq,
+        ),
+        // RFC 8474 Section 7.
+        map(
+            delimited(tag_no_case(b"MAILBOXID ("), objectid, tag(b")")),
+            |id| StatusDataItem::MailboxId(ObjectId::unvalidated(id.inner().to_owned())),
         ),
     ))(input)
 }

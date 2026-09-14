@@ -18,6 +18,7 @@ use crate::{
     core::{AString, NString, NString8, Vec1},
     datetime::DateTime,
     envelope::Envelope,
+    extensions::objectid::ObjectId,
     flag::FlagFetch,
 };
 
@@ -244,6 +245,21 @@ pub enum MessageDataItemName<'a> {
     #[cfg(feature = "ext_condstore_qresync")]
     #[cfg_attr(docsrs, doc(cfg("ext_condstore_qresync")))]
     ModSeq,
+
+    /// The message's object identifier (RFC 8474 Section 5.1).
+    ///
+    /// ```imap
+    /// EMAILID
+    /// ```
+    EmailId,
+
+    /// The object identifier of the message's thread (RFC 8474 Section
+    /// 5.2).
+    ///
+    /// ```imap
+    /// THREADID
+    /// ```
+    ThreadId,
 }
 
 /// Message data item.
@@ -385,6 +401,13 @@ pub enum MessageDataItem<'a> {
     #[cfg(feature = "ext_condstore_qresync")]
     #[cfg_attr(docsrs, doc(cfg("ext_condstore_qresync")))]
     ModSeq(NonZeroU64),
+
+    /// `EMAILID (objectid)` (RFC 8474 Section 5.1).
+    EmailId(ObjectId<'a>),
+
+    /// `THREADID (objectid)`, or `THREADID NIL` from a server that does not
+    /// thread (RFC 8474 Section 5.2).
+    ThreadId(Option<ObjectId<'a>>),
 }
 
 /// A part specifier is either a part number or one of the following:

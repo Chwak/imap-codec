@@ -20,7 +20,7 @@ use crate::{
     core::{astring, atom, charset, number, nz_number, tag_imap},
     datetime::date,
     decode::{IMAPErrorKind, IMAPParseError, IMAPResult},
-    extensions::uidplus::uid_set,
+    extensions::{objectid::objectid, uidplus::uid_set},
     fetch::header_fld_name,
     sequence::sequence_set_or_saved,
 };
@@ -233,6 +233,15 @@ fn search_key_limited(input: &[u8], remaining_recursion: usize) -> IMAPResult<&[
             map(tuple((tag_no_case(b"TO"), sp, astring)), |(_, _, val)| {
                 SearchKey::To(val)
             }),
+            // RFC 8474 Section 7.
+            map(
+                preceded(tag_no_case(b"EMAILID "), objectid),
+                SearchKey::EmailId,
+            ),
+            map(
+                preceded(tag_no_case(b"THREADID "), objectid),
+                SearchKey::ThreadId,
+            ),
         )),
         alt((
             value(SearchKey::Unanswered, tag_no_case(b"UNANSWERED")),

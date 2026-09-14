@@ -21,6 +21,7 @@ use crate::core::{IString, NString};
 use crate::extensions::metadata::{MetadataCode, MetadataResponse};
 #[cfg(feature = "ext_namespace")]
 use crate::extensions::namespace::Namespaces;
+use crate::extensions::objectid::ObjectId;
 #[cfg(feature = "ext_utf8")]
 use crate::extensions::utf8::Utf8Kind;
 #[cfg(feature = "ext_condstore_qresync")]
@@ -947,6 +948,10 @@ pub enum Code<'a> {
     /// (RFC 5182 Section 2.5), and `$` is not what the search found.
     NotSaved,
 
+    /// `MAILBOXID (objectid)` (RFC 8474 Sections 4.1 and 4.2): on the OK
+    /// of a `CREATE`, and untagged on a `SELECT` or `EXAMINE`.
+    MailboxId(ObjectId<'a>),
+
     /// IMAP4 Extension for Conditional STORE Operation (RFC 4551)
     /// A server supporting the persistent storage of mod-sequences for the mailbox
     /// MUST send the OK untagged response including HIGHESTMODSEQ response
@@ -1150,6 +1155,10 @@ pub enum Capability<'a> {
     ListExtended,
     /// LIST-STATUS extension (RFC 5819): `LIST ... RETURN (STATUS ...)`.
     ListStatus,
+    /// OBJECTID extension (RFC 8474).
+    ObjectId,
+    /// UNAUTHENTICATE extension (RFC 8437).
+    Unauthenticate,
     /// SPECIAL-USE extension (RFC 6154 Section 2): the server reports
     /// `\\Sent`, `\\Drafts` and the rest in its `LIST` responses.
     SpecialUse,
@@ -1220,6 +1229,8 @@ impl Display for Capability<'_> {
             Self::MultiAppend => write!(f, "MULTIAPPEND"),
             Self::ListExtended => write!(f, "LIST-EXTENDED"),
             Self::ListStatus => write!(f, "LIST-STATUS"),
+            Self::ObjectId => write!(f, "OBJECTID"),
+            Self::Unauthenticate => write!(f, "UNAUTHENTICATE"),
             Self::SpecialUse => write!(f, "SPECIAL-USE"),
             Self::CreateSpecialUse => write!(f, "CREATE-SPECIAL-USE"),
             Self::StatusSize => write!(f, "STATUS=SIZE"),
@@ -1307,6 +1318,8 @@ impl<'a> From<Atom<'a>> for Capability<'a> {
             "multiappend" => Self::MultiAppend,
             "list-extended" => Self::ListExtended,
             "list-status" => Self::ListStatus,
+            "objectid" => Self::ObjectId,
+            "unauthenticate" => Self::Unauthenticate,
             "special-use" => Self::SpecialUse,
             "create-special-use" => Self::CreateSpecialUse,
             // Before the "=" split below, which would otherwise read this
