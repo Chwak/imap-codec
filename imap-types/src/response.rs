@@ -39,7 +39,7 @@ use crate::{
     },
     fetch::MessageDataItem,
     flag::{Flag, FlagNameAttribute, FlagPerm},
-    mailbox::Mailbox,
+    mailbox::{ListExtendedItem, Mailbox},
     response::error::{ContinueError, FetchError},
     search::EsearchResponse,
     status::StatusDataItem,
@@ -395,6 +395,10 @@ pub enum Data<'a> {
         delimiter: Option<QuotedChar>,
         /// Name
         mailbox: Mailbox<'a>,
+        /// Extended data items (RFC 5258 Section 3.5), such as
+        /// `CHILDINFO`. Empty for a response that has none, which is
+        /// every response to a `LIST` without `RECURSIVEMATCH`.
+        extended: Vec<ListExtendedItem<'a>>,
     },
 
     /// ### 7.2.3. LSUB Response

@@ -71,7 +71,10 @@ use imap_types::{
         Macro, MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName, Part, Section,
     },
     flag::{Flag, FlagFetch, FlagNameAttribute, FlagPerm, StoreResponse, StoreType},
-    mailbox::{ListCharString, ListMailbox, Mailbox, MailboxOther, MailboxUse},
+    mailbox::{
+        ListCharString, ListExtendedItem, ListMailbox, ListPatterns, ListReturnOption,
+        ListSelectOption, Mailbox, MailboxOther, MailboxUse,
+    },
     response::{
         Bye, Capability, Code, CodeOther, CommandContinuationRequest, Data, Greeting, GreetingKind,
         Response, Status, StatusBody, StatusKind, Tagged,
@@ -405,13 +408,26 @@ impl EncodeIntoContext for CommandBody<'_> {
                 mailbox.encode_ctx(ctx)
             }
             CommandBody::List {
+                selection_options,
                 reference,
-                mailbox_wildcard,
+                patterns,
+                return_options,
             } => {
                 ctx.write_all(b"LIST ")?;
+                if let Some(options) = selection_options {
+                    ctx.write_all(b"(")?;
+                    join_serializable(options, b" ", ctx)?;
+                    ctx.write_all(b") ")?;
+                }
                 reference.encode_ctx(ctx)?;
                 ctx.write_all(b" ")?;
-                mailbox_wildcard.encode_ctx(ctx)
+                patterns.encode_ctx(ctx)?;
+                if let Some(options) = return_options {
+                    ctx.write_all(b" RETURN (")?;
+                    join_serializable(options, b" ", ctx)?;
+                    ctx.write_all(b")")?;
+                }
+                Ok(())
             }
             CommandBody::Lsub {
                 reference,
@@ -854,6 +870,65 @@ impl EncodeIntoContext for ListMailbox<'_> {
         match self {
             ListMailbox::Token(lcs) => lcs.encode_ctx(ctx),
             ListMailbox::String(istr) => istr.encode_ctx(ctx),
+        }
+    }
+}
+
+impl EncodeIntoContext for ListPatterns<'_> {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        match self {
+            ListPatterns::One(pattern) => pattern.encode_ctx(ctx),
+            ListPatterns::Several(patterns) => {
+                ctx.write_all(b"(")?;
+                join_serializable(patterns.as_ref(), b" ", ctx)?;
+                ctx.write_all(b")")
+            }
+        }
+    }
+}
+
+impl EncodeIntoContext for ListSelectOption {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        ctx.write_all(self.as_ref().as_bytes())
+    }
+}
+
+impl EncodeIntoContext for ListReturnOption {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        match self {
+            ListReturnOption::Subscribed => ctx.write_all(b"SUBSCRIBED"),
+            ListReturnOption::Children => ctx.write_all(b"CHILDREN"),
+            ListReturnOption::Status(items) => {
+                ctx.write_all(b"STATUS (")?;
+                join_serializable(items.as_ref(), b" ", ctx)?;
+                ctx.write_all(b")")
+            }
+            ListReturnOption::SpecialUse => ctx.write_all(b"SPECIAL-USE"),
+        }
+    }
+}
+
+impl EncodeIntoContext for ListExtendedItem<'_> {
+    fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
+        // Quoted, as every example in RFC 5258 writes both the tag and
+        // the option names: `("CHILDINFO" ("SUBSCRIBED"))`. The rule
+        // makes each quoted option mandatory (`list-select-base-opt-quoted`).
+        match self {
+            ListExtendedItem::ChildInfo(options) => {
+                ctx.write_all(b"\"CHILDINFO\" (")?;
+                if let Some((last, head)) = options.as_ref().split_last() {
+                    for option in head {
+                        write!(ctx, "\"{}\" ", option.as_ref())?;
+                    }
+                    write!(ctx, "\"{}\"", last.as_ref())?;
+                }
+                ctx.write_all(b")")
+            }
+            ListExtendedItem::OldName(mailbox) => {
+                ctx.write_all(b"\"OLDNAME\" (")?;
+                mailbox.encode_ctx(ctx)?;
+                ctx.write_all(b")")
+            }
         }
     }
 }
@@ -1589,6 +1664,7 @@ impl EncodeIntoContext for Data<'_> {
                 items,
                 delimiter,
                 mailbox,
+                extended,
             } => {
                 ctx.write_all(b"* LIST (")?;
                 join_serializable(items, b" ", ctx)?;
@@ -1603,6 +1679,11 @@ impl EncodeIntoContext for Data<'_> {
                 }
                 ctx.write_all(b" ")?;
                 mailbox.encode_ctx(ctx)?;
+                if !extended.is_empty() {
+                    ctx.write_all(b" (")?;
+                    join_serializable(extended, b" ", ctx)?;
+                    ctx.write_all(b")")?;
+                }
             }
             Data::Lsub {
                 items,

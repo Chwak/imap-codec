@@ -59,7 +59,7 @@ use crate::{
     },
     fetch::fetch_att,
     flag::{flag, flag_list},
-    mailbox::{list_mailbox, mailbox},
+    mailbox::{list_mailbox, list_patterns, list_return_opts, list_select_opts, mailbox},
     search::search,
     sequence::sequence_set,
     status::status_att,
@@ -352,17 +352,33 @@ pub(crate) fn examine(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     ))
 }
 
-/// `list = "LIST" SP mailbox SP list-mailbox`
+/// ```abnf
+/// list = "LIST" [SP list-select-opts] SP mailbox SP mbox-or-pat
+///        [SP list-return-opts]
+/// ```
+///
+/// RFC 5258 Section 6, which RFC 9051 Section 9 adopts for IMAP4rev2.
 pub(crate) fn list(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
-    let mut parser = tuple((tag_no_case(b"LIST "), mailbox, sp, list_mailbox));
+    let mut parser = tuple((
+        tag_no_case(b"LIST"),
+        opt(preceded(sp, list_select_opts)),
+        sp,
+        mailbox,
+        sp,
+        list_patterns,
+        opt(preceded(sp, list_return_opts)),
+    ));
 
-    let (remaining, (_, reference, _, mailbox_wildcard)) = parser(input)?;
+    let (remaining, (_, selection_options, _, reference, _, patterns, return_options)) =
+        parser(input)?;
 
     Ok((
         remaining,
         CommandBody::List {
+            selection_options,
             reference,
-            mailbox_wildcard,
+            patterns,
+            return_options,
         },
     ))
 }

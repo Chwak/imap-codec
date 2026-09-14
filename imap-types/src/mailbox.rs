@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "arbitrary")]
 use crate::arbitrary::impl_arbitrary_try_from;
 use crate::{
-    core::{AString, Atom, IString, impl_try_from},
+    core::{AString, Atom, IString, Vec1, impl_try_from},
     error::{ValidationError, ValidationErrorKind},
     mailbox::error::MailboxOtherError,
     utils::indicators::is_list_char,
@@ -452,4 +452,163 @@ impl AsRef<str> for MailboxUseOther<'_> {
     fn as_ref(&self) -> &str {
         self.0.as_ref()
     }
+}
+
+/// The mailbox patterns of a `LIST` command.
+///
+/// RFC 5258 Section 3 lets `LIST` take several patterns in parentheses,
+/// and a mailbox that matches any of them is listed once. One pattern in
+/// parentheses is not the same command as the same pattern bare: `LIST ""
+/// ("")` is extended, and RFC 5258 Section 3 has the empty name mean
+/// nothing special there, where `LIST "" ""` asks for the hierarchy
+/// delimiter. So the two spellings are kept apart.
+///
+/// ```abnf
+/// mbox-or-pat = list-mailbox / patterns
+/// patterns    = "(" list-mailbox *(SP list-mailbox) ")"
+/// ```
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "content"))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub enum ListPatterns<'a> {
+    /// One pattern, not in parentheses: the `LIST` of RFC 3501.
+    One(ListMailbox<'a>),
+    /// Patterns in parentheses (RFC 5258 Section 3).
+    Several(Vec1<ListMailbox<'a>>),
+}
+
+impl ListPatterns<'_> {
+    /// The patterns, however they were written.
+    pub fn as_slice(&self) -> &[ListMailbox<'_>] {
+        match self {
+            Self::One(one) => std::slice::from_ref(one),
+            Self::Several(several) => several.as_ref(),
+        }
+    }
+}
+
+impl<'a> From<ListMailbox<'a>> for ListPatterns<'a> {
+    fn from(one: ListMailbox<'a>) -> Self {
+        Self::One(one)
+    }
+}
+
+/// A `LIST` selection option (RFC 5258 Section 3.1, RFC 6154 Section 5.1).
+///
+/// Option names are case-insensitive (RFC 5258 Section 9.2). An option
+/// this crate has no name for is not accepted: RFC 5258 Section 3 has the
+/// server answer `BAD` to an option it does not recognise, and reading
+/// `option-extension` here would leave the server unable to tell one it
+/// knows from one it does not — the same reasoning as
+/// `search-ret-opt-ext` for `SEARCH RETURN`.
+///
+/// ```abnf
+/// list-select-base-opt        = "SUBSCRIBED" / option-extension
+/// list-select-base-opt        =/ "SPECIAL-USE"   ; RFC 6154
+/// list-select-independent-opt = "REMOTE" / option-extension
+/// list-select-mod-opt         = "RECURSIVEMATCH" / option-extension
+/// ```
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ToStatic)]
+pub enum ListSelectOption {
+    /// Only subscribed names, including subscribed names that do not
+    /// exist (a base option).
+    Subscribed,
+    /// Remote mailboxes too, as RFC 2193 describes them (an independent
+    /// option).
+    Remote,
+    /// Also a name that does not match the criteria itself but has a
+    /// descendant that does, with `CHILDINFO` saying why (a modifier: it
+    /// needs a base option beside it).
+    RecursiveMatch,
+    /// Only mailboxes with a special-use attribute (RFC 6154 Section 5.1;
+    /// a base option).
+    SpecialUse,
+}
+
+impl ListSelectOption {
+    /// Whether this is a base option, which is what a modifier such as
+    /// `RECURSIVEMATCH` modifies.
+    pub fn is_base(&self) -> bool {
+        matches!(self, Self::Subscribed | Self::SpecialUse)
+    }
+
+    /// Whether this is an independent option, which may be the only kind
+    /// in the list.
+    pub fn is_independent(&self) -> bool {
+        matches!(self, Self::Remote)
+    }
+
+    /// Whether a list of options is one RFC 5258 Section 6 allows: empty,
+    /// holding a base option, or holding independent options only. So
+    /// `(RECURSIVEMATCH)` and `(RECURSIVEMATCH REMOTE)` are not, which
+    /// RFC 5258 Section 3.1 has the server refuse with `BAD`.
+    pub fn valid_combination(options: &[ListSelectOption]) -> bool {
+        options.iter().any(Self::is_base) || options.iter().all(Self::is_independent)
+    }
+}
+
+impl AsRef<str> for ListSelectOption {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Subscribed => "SUBSCRIBED",
+            Self::Remote => "REMOTE",
+            Self::RecursiveMatch => "RECURSIVEMATCH",
+            Self::SpecialUse => "SPECIAL-USE",
+        }
+    }
+}
+
+/// A `LIST` return option (RFC 5258 Section 3.2, RFC 5819 Section 2, RFC
+/// 6154 Section 5.1). Unrecognised options are not accepted, for the
+/// reason given at [`ListSelectOption`].
+///
+/// ```abnf
+/// return-option =  "SUBSCRIBED" / "CHILDREN" / option-extension
+/// return-option =/ "STATUS" SP "(" status-att *(SP status-att) ")"  ; RFC 5819
+/// return-option =/ "SPECIAL-USE"                                    ; RFC 6154
+/// ```
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub enum ListReturnOption {
+    /// `\Subscribed` on each name that is subscribed.
+    Subscribed,
+    /// `\HasChildren` or `\HasNoChildren` on each name.
+    Children,
+    /// A `STATUS` response for each selectable mailbox listed (LIST-STATUS).
+    Status(Vec1<crate::status::StatusDataItemName>),
+    /// The special-use attributes of each mailbox.
+    SpecialUse,
+}
+
+/// An extended data item at the end of a `LIST` response (RFC 5258
+/// Section 3.5 and Section 6).
+///
+/// ```abnf
+/// mbox-list-extended      = "(" [mbox-list-extended-item
+///                           *(SP mbox-list-extended-item)] ")"
+/// childinfo-extended-item = "CHILDINFO" SP "("
+///                           list-select-base-opt-quoted
+///                           *(SP list-select-base-opt-quoted) ")"
+/// oldname-extended-item   = "OLDNAME" SP "(" mailbox ")"
+/// ```
+///
+/// `mbox-list-extended-item` in general is a tag and RFC 4466's
+/// `tagged-ext-val`. Only the two items RFC 5258 defines are read: a
+/// server sends extended items only for options the client asked for, and
+/// a client that asked for no other has none to expect.
+#[cfg_attr(feature = "arbitrary", derive(Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type", content = "content"))]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ToStatic)]
+pub enum ListExtendedItem<'a> {
+    /// `RECURSIVEMATCH` listed this name because a descendant meets these
+    /// selection criteria.
+    ChildInfo(Vec1<ListSelectOption>),
+    /// The mailbox was renamed from this name (RFC 5258 Section 6, as
+    /// NOTIFY and RENAME use it).
+    OldName(Mailbox<'a>),
 }

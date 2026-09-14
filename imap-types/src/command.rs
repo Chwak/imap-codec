@@ -29,7 +29,7 @@ use crate::{
     },
     fetch::MacroOrMessageDataItemNames,
     flag::{Flag, StoreResponse, StoreType},
-    mailbox::{ListMailbox, Mailbox, MailboxUse},
+    mailbox::{ListMailbox, ListPatterns, ListReturnOption, ListSelectOption, Mailbox, MailboxUse},
     search::{SearchKey, SearchReturnOption},
     secret::Secret,
     sequence::SequenceSet,
@@ -853,11 +853,30 @@ pub enum CommandBody<'a> {
     /// criteria for omitting INBOX is whether SELECT INBOX will return
     /// failure; it is not relevant whether the user's real INBOX resides
     /// on this or some other server.
+    ///
+    /// RFC 5258 (LIST-EXTENDED) adds selection options before the
+    /// reference, several patterns in parentheses, and return options
+    /// after them; RFC 5819 (LIST-STATUS) and RFC 6154 (SPECIAL-USE) add
+    /// options of their own; RFC 9051 Section 6.3.9 makes all of it
+    /// IMAP4rev2's `LIST`.
+    ///
+    /// ```abnf
+    /// list = "LIST" [SP list-select-opts] SP mailbox SP mbox-or-pat
+    ///        [SP list-return-opts]
+    /// ```
     List {
+        /// Selection options (RFC 5258 Section 3.1). `None` when the
+        /// command has none, which is not the same as `()`: any extended
+        /// syntax makes the command extended, and RFC 5258 Section 3 has
+        /// an extended `LIST` treat the empty name as nothing special.
+        selection_options: Option<Vec<ListSelectOption>>,
         /// Reference.
         reference: Mailbox<'a>,
-        /// Mailbox (wildcard).
-        mailbox_wildcard: ListMailbox<'a>,
+        /// Mailbox pattern, or patterns (wildcard).
+        patterns: ListPatterns<'a>,
+        /// Return options (RFC 5258 Section 3.2). `None` when the command
+        /// has no `RETURN`, which again is not the same as `RETURN ()`.
+        return_options: Option<Vec<ListReturnOption>>,
     },
 
     /// ### 6.3.9.  LSUB Command
@@ -1803,8 +1822,10 @@ impl<'a> CommandBody<'a> {
         B: TryInto<ListMailbox<'a>>,
     {
         Ok(CommandBody::List {
+            selection_options: None,
             reference: reference.try_into().map_err(ListError::Reference)?,
-            mailbox_wildcard: mailbox_wildcard.try_into().map_err(ListError::Mailbox)?,
+            patterns: ListPatterns::One(mailbox_wildcard.try_into().map_err(ListError::Mailbox)?),
+            return_options: None,
         })
     }
 
@@ -2076,7 +2097,7 @@ mod tests {
         extensions::{binary::Literal8, compress::CompressionAlgorithm},
         fetch::{Macro, MacroOrMessageDataItemNames, MessageDataItemName, Part, Section},
         flag::{Flag, StoreType},
-        mailbox::{ListMailbox, Mailbox},
+        mailbox::{ListMailbox, ListPatterns, Mailbox},
         search::SearchKey,
         secret::Secret,
         sequence::{SeqOrUid, Sequence, SequenceSet},
@@ -2335,8 +2356,10 @@ mod tests {
             ),
             (
                 CommandBody::List {
+                    selection_options: None,
                     reference: Mailbox::Inbox,
-                    mailbox_wildcard: ListMailbox::try_from("").unwrap(),
+                    patterns: ListPatterns::One(ListMailbox::try_from("").unwrap()),
+                    return_options: None,
                 },
                 "LIST",
             ),
