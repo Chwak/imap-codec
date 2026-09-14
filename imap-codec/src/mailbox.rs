@@ -29,6 +29,7 @@ use crate::{
     core::{astring, nil, number, nz_number, quoted_char, string},
     decode::IMAPResult,
     extensions::{
+        acl::acl_data,
         quota::{quota_response, quotaroot_response},
         thread::thread_data,
     },
@@ -321,6 +322,9 @@ pub(crate) fn mailbox_data(input: &[u8]) -> IMAPResult<&[u8], Data> {
         map(terminated(number, tag_no_case(b" RECENT")), Data::Recent),
         quotaroot_response,
         quota_response,
+        // RFC 4314 Section 7. `LIST ` needs its space, so `LISTRIGHTS`
+        // cannot be read as a `LIST`.
+        acl_data,
     ))(input)
 }
 

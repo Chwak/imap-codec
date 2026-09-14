@@ -1653,6 +1653,56 @@ pub enum CommandBody<'a> {
         quotas: Vec<QuotaSet<'a>>,
     },
 
+    /// `SETACL mailbox identifier mod-rights` (RFC 4314 Section 3.1):
+    /// change what `identifier` may do in `mailbox`. `rights` is as the
+    /// client wrote it — a leading `+` adds, a leading `-` removes, and
+    /// neither replaces.
+    ///
+    /// ```imap
+    /// C: A035 SETACL INBOX/Drafts John lrQswicda
+    /// S: A035 BAD Uppercase rights are not allowed
+    /// C: A036 SETACL INBOX/Drafts John lrswicda
+    /// S: A036 OK SETACL complete
+    /// ```
+    SetAcl {
+        /// The mailbox.
+        mailbox: Mailbox<'a>,
+        /// Whose rights.
+        identifier: AString<'a>,
+        /// The rights, with their `+` or `-`.
+        rights: AString<'a>,
+    },
+
+    /// `DELETEACL mailbox identifier` (RFC 4314 Section 3.2): remove
+    /// `identifier` from the mailbox's ACL.
+    DeleteAcl {
+        /// The mailbox.
+        mailbox: Mailbox<'a>,
+        /// Whose entry.
+        identifier: AString<'a>,
+    },
+
+    /// `GETACL mailbox` (RFC 4314 Section 3.3), answered by `ACL`.
+    GetAcl {
+        /// The mailbox.
+        mailbox: Mailbox<'a>,
+    },
+
+    /// `LISTRIGHTS mailbox identifier` (RFC 4314 Section 3.4), answered by
+    /// `LISTRIGHTS`: what may be granted to `identifier` there.
+    ListRights {
+        /// The mailbox.
+        mailbox: Mailbox<'a>,
+        /// Whose rights.
+        identifier: AString<'a>,
+    },
+
+    /// `MYRIGHTS mailbox` (RFC 4314 Section 3.5), answered by `MYRIGHTS`.
+    MyRights {
+        /// The mailbox.
+        mailbox: Mailbox<'a>,
+    },
+
     /// MOVE command.
     ///
     /// <div class="warning">
@@ -2015,6 +2065,11 @@ impl<'a> CommandBody<'a> {
             Self::GetQuota { .. } => "GETQUOTA",
             Self::GetQuotaRoot { .. } => "GETQUOTAROOT",
             Self::SetQuota { .. } => "SETQUOTA",
+            Self::SetAcl { .. } => "SETACL",
+            Self::DeleteAcl { .. } => "DELETEACL",
+            Self::GetAcl { .. } => "GETACL",
+            Self::ListRights { .. } => "LISTRIGHTS",
+            Self::MyRights { .. } => "MYRIGHTS",
             Self::Move { .. } => "MOVE",
             #[cfg(feature = "ext_id")]
             Self::Id { .. } => "ID",
@@ -2507,6 +2562,40 @@ mod tests {
                     quotas: vec![],
                 },
                 "SETQUOTA",
+            ),
+            (
+                CommandBody::SetAcl {
+                    mailbox: Mailbox::Inbox,
+                    identifier: AString::try_from("fred").unwrap(),
+                    rights: AString::try_from("+lr").unwrap(),
+                },
+                "SETACL",
+            ),
+            (
+                CommandBody::DeleteAcl {
+                    mailbox: Mailbox::Inbox,
+                    identifier: AString::try_from("fred").unwrap(),
+                },
+                "DELETEACL",
+            ),
+            (
+                CommandBody::GetAcl {
+                    mailbox: Mailbox::Inbox,
+                },
+                "GETACL",
+            ),
+            (
+                CommandBody::ListRights {
+                    mailbox: Mailbox::Inbox,
+                    identifier: AString::try_from("fred").unwrap(),
+                },
+                "LISTRIGHTS",
+            ),
+            (
+                CommandBody::MyRights {
+                    mailbox: Mailbox::Inbox,
+                },
+                "MYRIGHTS",
             ),
             (
                 CommandBody::Move {

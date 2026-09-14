@@ -49,6 +49,7 @@ use crate::{
     datetime::date_time,
     decode::{IMAPErrorKind, IMAPResult},
     extensions::{
+        acl::acl_command,
         binary::literal8,
         compress::compress,
         enable::enable,
@@ -142,6 +143,8 @@ pub(crate) fn command_any(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
 ///                idle /         ; RFC 2177
 ///                enable /       ; RFC 5161
 ///                compress /     ; RFC 4978
+///                setacl / deleteacl / getacl / ; RFC 4314
+///                listrights / myrights /
 ///                getquota /     ; RFC 9208
 ///                getquotaroot / ; RFC 9208
 ///                setquota /     ; RFC 9208
@@ -152,6 +155,8 @@ pub(crate) fn command_any(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
 /// Note: Valid only in Authenticated or Selected state
 pub(crate) fn command_auth(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     alt((
+        // RFC 4314, before LIST and DELETE, whose names begin its own two.
+        acl_command,
         append,
         create,
         delete,
@@ -166,9 +171,8 @@ pub(crate) fn command_auth(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
         idle,
         enable,
         compress,
-        getquota,
-        getquotaroot,
-        setquota,
+        // One alternative, so that `alt` stays within its 21.
+        alt((getquota, getquotaroot, setquota)),
         #[cfg(feature = "ext_metadata")]
         setmetadata,
         #[cfg(feature = "ext_metadata")]

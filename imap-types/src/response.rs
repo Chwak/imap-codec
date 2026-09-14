@@ -591,6 +591,35 @@ pub enum Data<'a> {
         roots: Vec<AString<'a>>,
     },
 
+    /// `ACL mailbox *(SP identifier SP rights)` (RFC 4314 Section 3.6).
+    Acl {
+        /// The mailbox.
+        mailbox: Mailbox<'a>,
+        /// Each identifier with its rights.
+        entries: Vec<(AString<'a>, AString<'a>)>,
+    },
+
+    /// `LISTRIGHTS mailbox identifier rights *(SP rights)` (RFC 4314
+    /// Section 3.7).
+    ListRights {
+        /// The mailbox.
+        mailbox: Mailbox<'a>,
+        /// Whose rights.
+        identifier: AString<'a>,
+        /// The rights always granted, which may be empty.
+        required: AString<'a>,
+        /// Each group of rights that may be granted, together, besides.
+        optional: Vec<AString<'a>>,
+    },
+
+    /// `MYRIGHTS mailbox rights` (RFC 4314 Section 3.8).
+    MyRights {
+        /// The mailbox.
+        mailbox: Mailbox<'a>,
+        /// The rights the session's user has there.
+        rights: AString<'a>,
+    },
+
     #[cfg(feature = "ext_id")]
     /// ID Response
     Id {
@@ -1161,6 +1190,8 @@ pub enum Capability<'a> {
     Unauthenticate,
     /// REPLACE extension (RFC 8508).
     Replace,
+    /// ACL extension (RFC 4314). Its `RIGHTS=` companion is an `Other`.
+    Acl,
     /// SAVEDATE extension (RFC 8514).
     SaveDate,
     /// SPECIAL-USE extension (RFC 6154 Section 2): the server reports
@@ -1236,6 +1267,7 @@ impl Display for Capability<'_> {
             Self::ObjectId => write!(f, "OBJECTID"),
             Self::Unauthenticate => write!(f, "UNAUTHENTICATE"),
             Self::Replace => write!(f, "REPLACE"),
+            Self::Acl => write!(f, "ACL"),
             Self::SaveDate => write!(f, "SAVEDATE"),
             Self::SpecialUse => write!(f, "SPECIAL-USE"),
             Self::CreateSpecialUse => write!(f, "CREATE-SPECIAL-USE"),
@@ -1327,6 +1359,7 @@ impl<'a> From<Atom<'a>> for Capability<'a> {
             "objectid" => Self::ObjectId,
             "unauthenticate" => Self::Unauthenticate,
             "replace" => Self::Replace,
+            "acl" => Self::Acl,
             "savedate" => Self::SaveDate,
             "special-use" => Self::SpecialUse,
             "create-special-use" => Self::CreateSpecialUse,

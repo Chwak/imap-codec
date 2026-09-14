@@ -641,6 +641,44 @@ impl EncodeIntoContext for CommandBody<'_> {
                 ctx.write_all(b"GETQUOTAROOT ")?;
                 mailbox.encode_ctx(ctx)
             }
+            CommandBody::SetAcl {
+                mailbox,
+                identifier,
+                rights,
+            } => {
+                ctx.write_all(b"SETACL ")?;
+                mailbox.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                identifier.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                rights.encode_ctx(ctx)
+            }
+            CommandBody::DeleteAcl {
+                mailbox,
+                identifier,
+            } => {
+                ctx.write_all(b"DELETEACL ")?;
+                mailbox.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                identifier.encode_ctx(ctx)
+            }
+            CommandBody::GetAcl { mailbox } => {
+                ctx.write_all(b"GETACL ")?;
+                mailbox.encode_ctx(ctx)
+            }
+            CommandBody::ListRights {
+                mailbox,
+                identifier,
+            } => {
+                ctx.write_all(b"LISTRIGHTS ")?;
+                mailbox.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                identifier.encode_ctx(ctx)
+            }
+            CommandBody::MyRights { mailbox } => {
+                ctx.write_all(b"MYRIGHTS ")?;
+                mailbox.encode_ctx(ctx)
+            }
             CommandBody::SetQuota { root, quotas } => {
                 ctx.write_all(b"SETQUOTA ")?;
                 root.encode_ctx(ctx)?;
@@ -1881,6 +1919,39 @@ impl EncodeIntoContext for Data<'_> {
                     ctx.write_all(b" ")?;
                     root.encode_ctx(ctx)?;
                 }
+            }
+            Data::Acl { mailbox, entries } => {
+                ctx.write_all(b"* ACL ")?;
+                mailbox.encode_ctx(ctx)?;
+                for (identifier, rights) in entries {
+                    ctx.write_all(b" ")?;
+                    identifier.encode_ctx(ctx)?;
+                    ctx.write_all(b" ")?;
+                    rights.encode_ctx(ctx)?;
+                }
+            }
+            Data::ListRights {
+                mailbox,
+                identifier,
+                required,
+                optional,
+            } => {
+                ctx.write_all(b"* LISTRIGHTS ")?;
+                mailbox.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                identifier.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                required.encode_ctx(ctx)?;
+                for rights in optional {
+                    ctx.write_all(b" ")?;
+                    rights.encode_ctx(ctx)?;
+                }
+            }
+            Data::MyRights { mailbox, rights } => {
+                ctx.write_all(b"* MYRIGHTS ")?;
+                mailbox.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                rights.encode_ctx(ctx)?;
             }
             #[cfg(feature = "ext_id")]
             Data::Id { parameters } => {

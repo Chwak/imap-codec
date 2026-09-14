@@ -1,3 +1,4 @@
+pub mod acl;
 pub mod binary;
 pub mod compress;
 #[cfg(feature = "ext_condstore_qresync")]
