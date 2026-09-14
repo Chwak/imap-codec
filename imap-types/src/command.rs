@@ -21,11 +21,11 @@ use crate::extensions::metadata::{Entry, EntryValue, GetMetadataOption};
 use crate::{
     auth::AuthMechanism,
     command::error::{AppendError, CopyError, ListError, LoginError, RenameError},
-    core::{AString, Charset, Literal, Tag, Vec1},
+    core::{AString, Atom, Charset, Literal, Tag, Vec1},
     datetime::DateTime,
     extensions::{
         binary::LiteralOrLiteral8, compress::CompressionAlgorithm, enable::CapabilityEnable,
-        quota::QuotaSet, sort::SortCriterion, thread::ThreadingAlgorithm,
+        quota::QuotaSet, sort::SortCriterion, thread::ThreadingAlgorithm, urlauth::UrlFetchArg,
     },
     fetch::MacroOrMessageDataItemNames,
     flag::{Flag, StoreResponse, StoreType},
@@ -1703,6 +1703,38 @@ pub enum CommandBody<'a> {
         mailbox: Mailbox<'a>,
     },
 
+    /// `GENURLAUTH 1*(SP url-rump SP mechanism)` (RFC 4467 Section 6.3.2):
+    /// sign each URL with its mailbox's access key, answered by
+    /// `GENURLAUTH` with the URLs completed.
+    ///
+    /// ```imap
+    /// C: a GENURLAUTH "imap://joe@example.com/INBOX/;uid=20/;section=1.2;urlauth=submit+fred" INTERNAL
+    /// S: * GENURLAUTH "imap://joe@example.com/INBOX/;uid=20/;section=1.2;urlauth=submit+fred:internal:91354a473744909de610943775f92038"
+    /// S: a OK GENURLAUTH completed
+    /// ```
+    GenUrlAuth {
+        /// Each URL rump with the mechanism to sign it by.
+        urls: Vec1<(AString<'a>, Atom<'a>)>,
+    },
+
+    /// `RESETKEY [SP mailbox *(SP mechanism)]` (RFC 4467 Section 6.3.1):
+    /// a new access key for the mailbox, or none for any mailbox when no
+    /// mailbox is named, revoking every URL signed with the old.
+    ResetKey {
+        /// The mailbox, or `None` for all of them.
+        mailbox: Option<Mailbox<'a>>,
+        /// The mechanisms the new key is for; empty unless a mailbox is
+        /// named.
+        mechanisms: Vec<Atom<'a>>,
+    },
+
+    /// `URLFETCH 1*(SP url-fetch-arg)` (RFC 4467 Section 6.3.3, RFC 5524
+    /// Section 3): what each URL names, answered by `URLFETCH`.
+    UrlFetch {
+        /// The URLs, each with its RFC 5524 parameters if it has any.
+        urls: Vec1<UrlFetchArg<'a>>,
+    },
+
     /// MOVE command.
     ///
     /// <div class="warning">
@@ -2070,6 +2102,9 @@ impl<'a> CommandBody<'a> {
             Self::GetAcl { .. } => "GETACL",
             Self::ListRights { .. } => "LISTRIGHTS",
             Self::MyRights { .. } => "MYRIGHTS",
+            Self::GenUrlAuth { .. } => "GENURLAUTH",
+            Self::ResetKey { .. } => "RESETKEY",
+            Self::UrlFetch { .. } => "URLFETCH",
             Self::Move { .. } => "MOVE",
             #[cfg(feature = "ext_id")]
             Self::Id { .. } => "ID",

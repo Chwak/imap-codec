@@ -22,6 +22,7 @@ use crate::extensions::metadata::{MetadataCode, MetadataResponse};
 #[cfg(feature = "ext_namespace")]
 use crate::extensions::namespace::Namespaces;
 use crate::extensions::objectid::ObjectId;
+use crate::extensions::urlauth::UrlFetchData;
 #[cfg(feature = "ext_utf8")]
 use crate::extensions::utf8::Utf8Kind;
 #[cfg(feature = "ext_condstore_qresync")]
@@ -620,6 +621,19 @@ pub enum Data<'a> {
         rights: AString<'a>,
     },
 
+    /// `GENURLAUTH 1*(SP url-full)` (RFC 4467 Section 7.4.1).
+    GenUrlAuth {
+        /// The signed URLs, in the order they were asked for.
+        urls: Vec1<AString<'a>>,
+    },
+
+    /// `URLFETCH 1*(SP url-full SP (nstring / url-metadata))` (RFC 4467
+    /// Section 7.4.2, RFC 5524 Section 3).
+    UrlFetch {
+        /// Each URL with what was found for it.
+        items: Vec1<UrlFetchData<'a>>,
+    },
+
     #[cfg(feature = "ext_id")]
     /// ID Response
     Id {
@@ -981,6 +995,15 @@ pub enum Code<'a> {
     /// of a `CREATE`, and untagged on a `SELECT` or `EXAMINE`.
     MailboxId(ObjectId<'a>),
 
+    /// `URLMECH SP "INTERNAL" *(SP mechanism ["=" base64])` (RFC 4467
+    /// Section 7.1): the URLAUTH mechanisms a mailbox's access key serves.
+    /// `INTERNAL` is always first and is not listed here; each other
+    /// mechanism may carry data for the client, in base64 on the wire.
+    UrlMech {
+        /// The mechanisms after `INTERNAL`.
+        mechanisms: Vec<(Atom<'a>, Option<Vec<u8>>)>,
+    },
+
     /// IMAP4 Extension for Conditional STORE Operation (RFC 4551)
     /// A server supporting the persistent storage of mod-sequences for the mailbox
     /// MUST send the OK untagged response including HIGHESTMODSEQ response
@@ -1192,6 +1215,9 @@ pub enum Capability<'a> {
     Replace,
     /// ACL extension (RFC 4314). Its `RIGHTS=` companion is an `Other`.
     Acl,
+    /// URLAUTH extension (RFC 4467). `URLAUTH=BINARY` (RFC 5524) is an
+    /// `Other`.
+    UrlAuth,
     /// SAVEDATE extension (RFC 8514).
     SaveDate,
     /// SPECIAL-USE extension (RFC 6154 Section 2): the server reports
@@ -1268,6 +1294,7 @@ impl Display for Capability<'_> {
             Self::Unauthenticate => write!(f, "UNAUTHENTICATE"),
             Self::Replace => write!(f, "REPLACE"),
             Self::Acl => write!(f, "ACL"),
+            Self::UrlAuth => write!(f, "URLAUTH"),
             Self::SaveDate => write!(f, "SAVEDATE"),
             Self::SpecialUse => write!(f, "SPECIAL-USE"),
             Self::CreateSpecialUse => write!(f, "CREATE-SPECIAL-USE"),
@@ -1360,6 +1387,7 @@ impl<'a> From<Atom<'a>> for Capability<'a> {
             "unauthenticate" => Self::Unauthenticate,
             "replace" => Self::Replace,
             "acl" => Self::Acl,
+            "urlauth" => Self::UrlAuth,
             "savedate" => Self::SaveDate,
             "special-use" => Self::SpecialUse,
             "create-special-use" => Self::CreateSpecialUse,

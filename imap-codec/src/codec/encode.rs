@@ -66,7 +66,10 @@ use imap_types::{
     },
     datetime::{DateTime, NaiveDate},
     envelope::{Address, Envelope},
-    extensions::idle::IdleDone,
+    extensions::{
+        idle::IdleDone,
+        urlauth::{UrlFetchValue, UrlMetadata},
+    },
     fetch::{
         Macro, MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName, Part, Section,
     },
@@ -678,6 +681,50 @@ impl EncodeIntoContext for CommandBody<'_> {
             CommandBody::MyRights { mailbox } => {
                 ctx.write_all(b"MYRIGHTS ")?;
                 mailbox.encode_ctx(ctx)
+            }
+            CommandBody::GenUrlAuth { urls } => {
+                ctx.write_all(b"GENURLAUTH")?;
+                for (rump, mechanism) in urls.as_ref() {
+                    ctx.write_all(b" ")?;
+                    rump.encode_ctx(ctx)?;
+                    ctx.write_all(b" ")?;
+                    mechanism.encode_ctx(ctx)?;
+                }
+                Ok(())
+            }
+            CommandBody::ResetKey {
+                mailbox,
+                mechanisms,
+            } => {
+                ctx.write_all(b"RESETKEY")?;
+                if let Some(mailbox) = mailbox {
+                    ctx.write_all(b" ")?;
+                    mailbox.encode_ctx(ctx)?;
+                    for mechanism in mechanisms {
+                        ctx.write_all(b" ")?;
+                        mechanism.encode_ctx(ctx)?;
+                    }
+                }
+                Ok(())
+            }
+            CommandBody::UrlFetch { urls } => {
+                ctx.write_all(b"URLFETCH")?;
+                for arg in urls.as_ref() {
+                    ctx.write_all(b" ")?;
+                    match &arg.params {
+                        None => arg.url.encode_ctx(ctx)?,
+                        Some(params) => {
+                            ctx.write_all(b"(")?;
+                            arg.url.encode_ctx(ctx)?;
+                            for param in params {
+                                ctx.write_all(b" ")?;
+                                param.encode_ctx(ctx)?;
+                            }
+                            ctx.write_all(b")")?;
+                        }
+                    }
+                }
+                Ok(())
             }
             CommandBody::SetQuota { root, quotas } => {
                 ctx.write_all(b"SETQUOTA ")?;
@@ -1590,6 +1637,18 @@ impl EncodeIntoContext for Code<'_> {
             Code::UseAttr => ctx.write_all(b"USEATTR"),
             Code::NotSaved => ctx.write_all(b"NOTSAVED"),
             Code::MailboxId(id) => write!(ctx, "MAILBOXID ({id})"),
+            Code::UrlMech { mechanisms } => {
+                ctx.write_all(b"URLMECH INTERNAL")?;
+                for (mechanism, data) in mechanisms {
+                    ctx.write_all(b" ")?;
+                    mechanism.encode_ctx(ctx)?;
+                    if let Some(data) = data {
+                        ctx.write_all(b"=")?;
+                        ctx.write_all(base64.encode(data).as_bytes())?;
+                    }
+                }
+                Ok(())
+            }
             Code::Other(unknown) => unknown.encode_ctx(ctx),
         }
     }
@@ -1952,6 +2011,46 @@ impl EncodeIntoContext for Data<'_> {
                 mailbox.encode_ctx(ctx)?;
                 ctx.write_all(b" ")?;
                 rights.encode_ctx(ctx)?;
+            }
+            Data::GenUrlAuth { urls } => {
+                ctx.write_all(b"* GENURLAUTH")?;
+                for url in urls.as_ref() {
+                    ctx.write_all(b" ")?;
+                    url.encode_ctx(ctx)?;
+                }
+            }
+            Data::UrlFetch { items } => {
+                ctx.write_all(b"* URLFETCH")?;
+                for item in items.as_ref() {
+                    ctx.write_all(b" ")?;
+                    item.url.encode_ctx(ctx)?;
+                    match &item.value {
+                        UrlFetchValue::Simple(data) => {
+                            ctx.write_all(b" ")?;
+                            data.encode_ctx(ctx)?;
+                        }
+                        UrlFetchValue::Metadata(metadata) => {
+                            for element in metadata {
+                                ctx.write_all(b" (")?;
+                                match element {
+                                    UrlMetadata::BodyPartStructure(structure) => {
+                                        ctx.write_all(b"BODYPARTSTRUCTURE ")?;
+                                        structure.encode_ctx(ctx)?;
+                                    }
+                                    UrlMetadata::Body(data) => {
+                                        ctx.write_all(b"BODY ")?;
+                                        data.encode_ctx(ctx)?;
+                                    }
+                                    UrlMetadata::Binary(data) => {
+                                        ctx.write_all(b"BINARY ")?;
+                                        data.encode_ctx(ctx)?;
+                                    }
+                                }
+                                ctx.write_all(b")")?;
+                            }
+                        }
+                    }
+                }
             }
             #[cfg(feature = "ext_id")]
             Data::Id { parameters } => {

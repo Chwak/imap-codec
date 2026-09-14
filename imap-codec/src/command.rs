@@ -59,6 +59,7 @@ use crate::{
         sort::sort,
         thread::thread,
         uidplus::uid_expunge,
+        urlauth::urlauth_command,
     },
     fetch::fetch_att,
     flag::{flag, flag_list},
@@ -143,6 +144,7 @@ pub(crate) fn command_any(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
 ///                idle /         ; RFC 2177
 ///                enable /       ; RFC 5161
 ///                compress /     ; RFC 4978
+///                resetkey / genurlauth / urlfetch / ; RFC 4467
 ///                setacl / deleteacl / getacl / ; RFC 4314
 ///                listrights / myrights /
 ///                getquota /     ; RFC 9208
@@ -157,6 +159,8 @@ pub(crate) fn command_auth(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     alt((
         // RFC 4314, before LIST and DELETE, whose names begin its own two.
         acl_command,
+        // RFC 4467 and RFC 5524.
+        urlauth_command,
         append,
         create,
         delete,

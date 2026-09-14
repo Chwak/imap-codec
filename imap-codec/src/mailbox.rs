@@ -32,6 +32,7 @@ use crate::{
         acl::acl_data,
         quota::{quota_response, quotaroot_response},
         thread::thread_data,
+        urlauth::urlauth_data,
     },
     flag::{flag_list, mbx_list_flags},
     search::esearch_response,
@@ -325,6 +326,8 @@ pub(crate) fn mailbox_data(input: &[u8]) -> IMAPResult<&[u8], Data> {
         // RFC 4314 Section 7. `LIST ` needs its space, so `LISTRIGHTS`
         // cannot be read as a `LIST`.
         acl_data,
+        // RFC 4467 Section 7.4 and RFC 5524 Section 3.
+        urlauth_data,
     ))(input)
 }
 

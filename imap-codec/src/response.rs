@@ -212,6 +212,8 @@ pub(crate) fn resp_text_code(input: &[u8]) -> IMAPResult<&[u8], Code> {
                 delimited(tag_no_case(b"MAILBOXID ("), objectid, tag(b")")),
                 Code::MailboxId,
             ),
+            // RFC 4467 Section 9.
+            crate::extensions::urlauth::resp_code_urlmech,
         )),
         #[cfg(feature = "ext_condstore_qresync")]
         alt((

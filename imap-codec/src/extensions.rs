@@ -19,5 +19,6 @@ pub mod sort;
 pub mod thread;
 pub mod uidplus;
 pub mod unselect;
+pub mod urlauth;
 #[cfg(feature = "ext_utf8")]
 pub mod utf8;
