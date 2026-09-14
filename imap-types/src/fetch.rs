@@ -274,6 +274,14 @@ pub enum MessageDataItemName<'a> {
         /// `PREVIEW (LAZY)`.
         lazy: bool,
     },
+
+    /// The date and time the message was saved in the mailbox it is in
+    /// now (RFC 8514 Section 4.2).
+    ///
+    /// ```imap
+    /// SAVEDATE
+    /// ```
+    SaveDate,
 }
 
 /// Message data item.
@@ -427,6 +435,11 @@ pub enum MessageDataItem<'a> {
     /// string when there is nothing to show, or `NIL` when `LAZY` let the
     /// server leave it for later.
     Preview(NString<'a>),
+
+    /// `SAVEDATE (date-time / nil)` (RFC 8514 Section 5): when the message
+    /// was saved in this mailbox, or `NIL` from a mailbox whose storage
+    /// does not keep it.
+    SaveDate(Option<DateTime>),
 }
 
 /// A part specifier is either a part number or one of the following:

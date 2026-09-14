@@ -1,4 +1,7 @@
 //! Object identifiers (RFC 8474) and `UNAUTHENTICATE` (RFC 8437).
+//!
+//! The tests below also hold the other small extensions the fork adds —
+//! PREVIEW, REPLACE and SAVEDATE — which have no parser module of their own.
 
 use imap_types::extensions::objectid::{ObjectId, is_objectid_char};
 use nom::{bytes::streaming::take_while_m_n, combinator::map};
@@ -99,6 +102,39 @@ mod tests {
                 .decode(b"A3 FETCH 1 (PREVIEW (FAST))\r\n")
                 .is_err(),
             "LAZY is the only modifier"
+        );
+    }
+
+    /// RFC 8514 Section 4's commands and answers.
+    #[test]
+    fn test_savedate_round_trips() {
+        round_trip_command(b"a FETCH 1:2 SAVEDATE\r\n");
+        round_trip_command(b"b UID FETCH 1:* (UID SAVEDATE INTERNALDATE)\r\n");
+        round_trip_command(b"c SEARCH SAVEDON \"01-Jan-2015\"\r\n");
+        round_trip_command(
+            b"d UID SEARCH SAVEDBEFORE \"14-Sep-2026\" SAVEDSINCE \"01-Sep-2026\"\r\n",
+        );
+        round_trip_command(b"e SEARCH SAVEDATESUPPORTED\r\n");
+        round_trip_command(b"f SEARCH OR SAVEDATESUPPORTED NOT SAVEDON \"02-Feb-2020\"\r\n");
+        round_trip_response(b"* 1 FETCH (SAVEDATE \"01-Jan-2015 18:50:53 +0100\")\r\n");
+        round_trip_response(b"* 2 FETCH (UID 7 SAVEDATE NIL)\r\n");
+        round_trip_response(b"* CAPABILITY IMAP4REV1 SAVEDATE\r\n");
+        for line in [
+            &b"g SEARCH SAVEDON\r\n"[..],
+            b"g SEARCH SAVEDON 01-Jan-2015 12:00:00\r\n",
+            b"g FETCH 1 (SAVEDATES)\r\n",
+        ] {
+            assert!(
+                CommandCodec::default().decode(line).is_err(),
+                "{} should not parse",
+                String::from_utf8_lossy(line)
+            );
+        }
+        assert!(
+            ResponseCodec::default()
+                .decode(b"* 1 FETCH (SAVEDATE \"01-Jan-2015\")\r\n")
+                .is_err(),
+            "a save date has a time"
         );
     }
 

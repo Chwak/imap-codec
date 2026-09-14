@@ -184,6 +184,22 @@ pub enum SearchKey<'a> {
     /// `THREADID objectid` (RFC 8474 Section 6): the messages of this
     /// thread.
     ThreadId(ObjectId<'a>),
+
+    /// `SAVEDBEFORE date` (RFC 8514 Section 4.3): messages whose save date
+    /// (disregarding time and timezone) is earlier than the date.
+    SavedBefore(NaiveDate),
+
+    /// `SAVEDON date` (RFC 8514 Section 4.3): messages whose save date
+    /// (disregarding time and timezone) is within the date.
+    SavedOn(NaiveDate),
+
+    /// `SAVEDSINCE date` (RFC 8514 Section 4.3): messages whose save date
+    /// (disregarding time and timezone) is within or later than the date.
+    SavedSince(NaiveDate),
+
+    /// `SAVEDATESUPPORTED` (RFC 8514 Section 4.3): every message of a
+    /// mailbox that keeps save dates, and none of one that does not.
+    SaveDateSupported,
 }
 
 impl SearchKey<'_> {

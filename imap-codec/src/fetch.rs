@@ -140,6 +140,8 @@ pub(crate) fn fetch_att(input: &[u8]) -> IMAPResult<&[u8], MessageDataItemName> 
                 lazy: modifiers.is_some(),
             },
         ),
+        // RFC 8514 Section 5: `fetch-att =/ "SAVEDATE"`.
+        value(MessageDataItemName::SaveDate, tag_no_case(b"SAVEDATE")),
     ))(input)
 }
 
@@ -293,6 +295,14 @@ pub(crate) fn msg_att_static(input: &[u8]) -> IMAPResult<&[u8], MessageDataItem>
                 )),
             ),
             MessageDataItem::ThreadId,
+        ),
+        // RFC 8514 Section 5: `msg-att-static =/ "SAVEDATE" SP (date-time / nil)`.
+        map(
+            preceded(
+                tag_no_case(b"SAVEDATE "),
+                alt((map(date_time, Some), value(None, nil))),
+            ),
+            MessageDataItem::SaveDate,
         ),
     ))(input)
 }

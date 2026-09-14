@@ -160,6 +160,10 @@ pub(crate) fn partial_range(input: &[u8]) -> IMAPResult<&[u8], PartialRange> {
 ///              "UID" SP sequence-set /
 ///              "UNDRAFT" /
 ///              search-modsequence / ; RFC 7162
+///              "SAVEDBEFORE" SP date / ; RFC 8514
+///              "SAVEDON" SP date /
+///              "SAVEDSINCE" SP date /
+///              "SAVEDATESUPPORTED" /
 ///              sequence-set /
 ///              "(" search-key *(SP search-key) ")"
 /// ```
@@ -241,6 +245,25 @@ fn search_key_limited(input: &[u8], remaining_recursion: usize) -> IMAPResult<&[
             map(
                 preceded(tag_no_case(b"THREADID "), objectid),
                 SearchKey::ThreadId,
+            ),
+        )),
+        // RFC 8514 Section 5. A group of its own: `alt` takes at most 21.
+        alt((
+            map(
+                preceded(tag_no_case(b"SAVEDBEFORE "), map_opt(date, |date| date)),
+                SearchKey::SavedBefore,
+            ),
+            map(
+                preceded(tag_no_case(b"SAVEDON "), map_opt(date, |date| date)),
+                SearchKey::SavedOn,
+            ),
+            map(
+                preceded(tag_no_case(b"SAVEDSINCE "), map_opt(date, |date| date)),
+                SearchKey::SavedSince,
+            ),
+            value(
+                SearchKey::SaveDateSupported,
+                tag_no_case(b"SAVEDATESUPPORTED"),
             ),
         )),
         alt((

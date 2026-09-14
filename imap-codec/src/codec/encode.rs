@@ -1114,6 +1114,19 @@ impl EncodeIntoContext for SearchKey<'_> {
             SearchKey::Undraft => ctx.write_all(b"UNDRAFT"),
             SearchKey::EmailId(id) => write!(ctx, "EMAILID {id}"),
             SearchKey::ThreadId(id) => write!(ctx, "THREADID {id}"),
+            SearchKey::SavedBefore(date) => {
+                ctx.write_all(b"SAVEDBEFORE ")?;
+                date.encode_ctx(ctx)
+            }
+            SearchKey::SavedOn(date) => {
+                ctx.write_all(b"SAVEDON ")?;
+                date.encode_ctx(ctx)
+            }
+            SearchKey::SavedSince(date) => {
+                ctx.write_all(b"SAVEDSINCE ")?;
+                date.encode_ctx(ctx)
+            }
+            SearchKey::SaveDateSupported => ctx.write_all(b"SAVEDATESUPPORTED"),
             #[cfg(feature = "ext_condstore_qresync")]
             SearchKey::ModSequence { entry, modseq } => {
                 ctx.write_all(b"MODSEQ")?;
@@ -1286,6 +1299,7 @@ impl EncodeIntoContext for MessageDataItemName<'_> {
             MessageDataItemName::ThreadId => ctx.write_all(b"THREADID"),
             MessageDataItemName::Preview { lazy: false } => ctx.write_all(b"PREVIEW"),
             MessageDataItemName::Preview { lazy: true } => ctx.write_all(b"PREVIEW (LAZY)"),
+            MessageDataItemName::SaveDate => ctx.write_all(b"SAVEDATE"),
         }
     }
 }
@@ -2086,6 +2100,11 @@ impl EncodeIntoContext for MessageDataItem<'_> {
                 ctx.write_all(b"PREVIEW ")?;
                 preview.encode_ctx(ctx)
             }
+            Self::SaveDate(Some(datetime)) => {
+                ctx.write_all(b"SAVEDATE ")?;
+                datetime.encode_ctx(ctx)
+            }
+            Self::SaveDate(None) => ctx.write_all(b"SAVEDATE NIL"),
         }
     }
 }
