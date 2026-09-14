@@ -102,6 +102,24 @@ mod tests {
         );
     }
 
+    /// RFC 8508 Section 3's examples, read and written back.
+    #[test]
+    fn test_replace_round_trips() {
+        let body = round_trip_command(b"a UID REPLACE 4 Drafts (\\Seen \\Draft) {5+}\r\nhello\r\n");
+        assert!(matches!(body, CommandBody::Replace { uid: true, .. }));
+        let body = round_trip_command(b"b REPLACE * \"Saved Drafts\" {3+}\r\nabc\r\n");
+        assert!(matches!(body, CommandBody::Replace { uid: false, .. }));
+        round_trip_command(
+            b"c REPLACE 2 Drafts \"05-Oct-2020 12:00:00 +0000\" CATENATE (TEXT {2+}\r\nhi URL \"/Drafts;UID=3/;SECTION=1\")\r\n",
+        );
+        assert!(
+            CommandCodec::default()
+                .decode(b"d REPLACE 1:2 Drafts {1+}\r\nx\r\n")
+                .is_err(),
+            "one message, not a set"
+        );
+    }
+
     /// RFC 8437 Section 2.
     #[test]
     fn test_unauthenticate_round_trips() {

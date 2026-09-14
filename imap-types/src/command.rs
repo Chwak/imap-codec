@@ -32,7 +32,7 @@ use crate::{
     mailbox::{ListMailbox, ListPatterns, ListReturnOption, ListSelectOption, Mailbox, MailboxUse},
     search::{SearchKey, SearchReturnOption},
     secret::Secret,
-    sequence::{SequenceSet, SequenceSetOrSaved},
+    sequence::{SeqOrUid, SequenceSet, SequenceSetOrSaved},
     status::StatusDataItemName,
 };
 
@@ -481,6 +481,27 @@ pub enum CommandBody<'a> {
     /// `UNAUTHENTICATE` (RFC 8437): back to the not-authenticated state,
     /// keeping the connection and its TLS.
     Unauthenticate,
+
+    /// `REPLACE` and `UID REPLACE` (RFC 8508): append a message to a
+    /// mailbox and expunge one from the selected mailbox, as one action —
+    /// how a client saves a new version of a draft.
+    ///
+    /// ```abnf
+    /// replace = "REPLACE" SP seq-number SP mailbox append-message
+    /// uid     =/ "UID" SP replace
+    /// ```
+    Replace {
+        /// The message replaced: a sequence number, or a UID for `UID
+        /// REPLACE`.
+        sequence_number: SeqOrUid,
+        /// Where the replacement goes.
+        mailbox: Mailbox<'a>,
+        /// The replacement, with its flags and date, as `APPEND` takes one
+        /// (and with `CATENATE`'s parts, RFC 8508 Section 4.2).
+        message: AppendMessage<'a>,
+        /// `UID REPLACE`.
+        uid: bool,
+    },
 
     /// Unselect a mailbox.
     ///
@@ -1968,6 +1989,7 @@ impl<'a> CommandBody<'a> {
             Self::Thread { .. } => "THREAD",
             Self::Unselect => "UNSELECT",
             Self::Unauthenticate => "UNAUTHENTICATE",
+            Self::Replace { .. } => "REPLACE",
             Self::CancelUpdate { .. } => "CANCELUPDATE",
             Self::Examine { .. } => "EXAMINE",
             Self::Create { .. } => "CREATE",

@@ -347,6 +347,22 @@ impl EncodeIntoContext for CommandBody<'_> {
             }
             CommandBody::Unselect => ctx.write_all(b"UNSELECT"),
             CommandBody::Unauthenticate => ctx.write_all(b"UNAUTHENTICATE"),
+            CommandBody::Replace {
+                sequence_number,
+                mailbox,
+                message,
+                uid,
+            } => {
+                if *uid {
+                    ctx.write_all(b"UID ")?;
+                }
+                ctx.write_all(b"REPLACE ")?;
+                sequence_number.encode_ctx(ctx)?;
+                ctx.write_all(b" ")?;
+                mailbox.encode_ctx(ctx)?;
+                // `append-message` begins with its own space.
+                message.encode_ctx(ctx)
+            }
             CommandBody::CancelUpdate { tags } => {
                 ctx.write_all(b"CANCELUPDATE")?;
                 // RFC 5267 Section 4.5 writes each tag as a

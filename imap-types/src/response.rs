@@ -1159,6 +1159,8 @@ pub enum Capability<'a> {
     ObjectId,
     /// UNAUTHENTICATE extension (RFC 8437).
     Unauthenticate,
+    /// REPLACE extension (RFC 8508).
+    Replace,
     /// SPECIAL-USE extension (RFC 6154 Section 2): the server reports
     /// `\\Sent`, `\\Drafts` and the rest in its `LIST` responses.
     SpecialUse,
@@ -1231,6 +1233,7 @@ impl Display for Capability<'_> {
             Self::ListStatus => write!(f, "LIST-STATUS"),
             Self::ObjectId => write!(f, "OBJECTID"),
             Self::Unauthenticate => write!(f, "UNAUTHENTICATE"),
+            Self::Replace => write!(f, "REPLACE"),
             Self::SpecialUse => write!(f, "SPECIAL-USE"),
             Self::CreateSpecialUse => write!(f, "CREATE-SPECIAL-USE"),
             Self::StatusSize => write!(f, "STATUS=SIZE"),
@@ -1320,6 +1323,7 @@ impl<'a> From<Atom<'a>> for Capability<'a> {
             "list-status" => Self::ListStatus,
             "objectid" => Self::ObjectId,
             "unauthenticate" => Self::Unauthenticate,
+            "replace" => Self::Replace,
             "special-use" => Self::SpecialUse,
             "create-special-use" => Self::CreateSpecialUse,
             // Before the "=" split below, which would otherwise read this

@@ -63,7 +63,7 @@ use crate::{
     flag::{flag, flag_list},
     mailbox::{list_mailbox, list_patterns, list_return_opts, list_select_opts, mailbox},
     search::search,
-    sequence::sequence_set_or_saved,
+    sequence::{seq_number, sequence_set_or_saved},
     status::status_att,
 };
 
@@ -683,6 +683,7 @@ pub(crate) fn command_select(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
         value(CommandBody::Unselect, tag_no_case(b"UNSELECT")),
         r#move,
         cancelupdate,
+        replace,
     ))(input)
 }
 
@@ -927,6 +928,35 @@ pub(crate) fn store_att_flags(
     Ok((remaining, (store_type, store_response, flag_list)))
 }
 
+/// ```abnf
+/// replace = "REPLACE" SP seq-number SP mailbox append-message
+/// ```
+///
+/// RFC 8508 Section 5. `append-message` is `APPEND`'s, so the replacement
+/// takes flags, a date and `CATENATE` parts exactly as an appended message
+/// does (Section 4.2).
+pub(crate) fn replace(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
+    let mut parser = tuple((
+        tag_no_case(b"REPLACE "),
+        seq_number,
+        sp,
+        mailbox,
+        append_message,
+    ));
+
+    let (remaining, (_, sequence_number, _, mailbox, message)) = parser(input)?;
+
+    Ok((
+        remaining,
+        CommandBody::Replace {
+            sequence_number,
+            mailbox,
+            message,
+            uid: false,
+        },
+    ))
+}
+
 /// `uid = "UID" SP (copy / fetch / search / store)`
 ///
 /// Note: Unique identifiers used instead of message sequence numbers
@@ -934,7 +964,7 @@ pub(crate) fn uid(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     let mut parser = tuple((
         tag_no_case(b"UID"),
         sp,
-        alt((copy, fetch, search, store, r#move)),
+        alt((copy, fetch, search, store, r#move, replace)),
     ));
 
     let (remaining, (_, _, mut cmd)) = parser(input)?;
@@ -944,7 +974,8 @@ pub(crate) fn uid(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
         | CommandBody::Fetch { ref mut uid, .. }
         | CommandBody::Search { ref mut uid, .. }
         | CommandBody::Store { ref mut uid, .. }
-        | CommandBody::Move { ref mut uid, .. } => *uid = true,
+        | CommandBody::Move { ref mut uid, .. }
+        | CommandBody::Replace { ref mut uid, .. } => *uid = true,
         _ => unreachable!(),
     }
 
