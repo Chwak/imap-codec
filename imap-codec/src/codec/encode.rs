@@ -707,6 +707,13 @@ impl EncodeIntoContext for CommandBody<'_> {
                 }
                 Ok(())
             }
+            CommandBody::Notify { set } => {
+                ctx.write_all(b"NOTIFY ")?;
+                match set {
+                    None => ctx.write_all(b"NONE"),
+                    Some(set) => set.encode_ctx(ctx),
+                }
+            }
             CommandBody::UrlFetch { urls } => {
                 ctx.write_all(b"URLFETCH")?;
                 for arg in urls.as_ref() {
@@ -1637,6 +1644,12 @@ impl EncodeIntoContext for Code<'_> {
             Code::UseAttr => ctx.write_all(b"USEATTR"),
             Code::NotSaved => ctx.write_all(b"NOTSAVED"),
             Code::MailboxId(id) => write!(ctx, "MAILBOXID ({id})"),
+            Code::NotificationOverflow => ctx.write_all(b"NOTIFICATIONOVERFLOW"),
+            Code::BadEvent(names) => {
+                ctx.write_all(b"BADEVENT (")?;
+                join_serializable(names.as_ref(), b" ", ctx)?;
+                ctx.write_all(b")")
+            }
             Code::UrlMech { mechanisms } => {
                 ctx.write_all(b"URLMECH INTERNAL")?;
                 for (mechanism, data) in mechanisms {

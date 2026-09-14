@@ -214,6 +214,8 @@ pub(crate) fn resp_text_code(input: &[u8]) -> IMAPResult<&[u8], Code> {
             ),
             // RFC 4467 Section 9.
             crate::extensions::urlauth::resp_code_urlmech,
+            // RFC 5465 Section 8.
+            crate::extensions::notify::resp_code_notify,
         )),
         #[cfg(feature = "ext_condstore_qresync")]
         alt((

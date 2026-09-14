@@ -25,7 +25,8 @@ use crate::{
     datetime::DateTime,
     extensions::{
         binary::LiteralOrLiteral8, compress::CompressionAlgorithm, enable::CapabilityEnable,
-        quota::QuotaSet, sort::SortCriterion, thread::ThreadingAlgorithm, urlauth::UrlFetchArg,
+        notify::NotifySet, quota::QuotaSet, sort::SortCriterion, thread::ThreadingAlgorithm,
+        urlauth::UrlFetchArg,
     },
     fetch::MacroOrMessageDataItemNames,
     flag::{Flag, StoreResponse, StoreType},
@@ -1728,6 +1729,14 @@ pub enum CommandBody<'a> {
         mechanisms: Vec<Atom<'a>>,
     },
 
+    /// `NOTIFY SET [STATUS] event-groups` or `NOTIFY NONE` (RFC 5465
+    /// Section 3.1): which changes to be told of unasked, replacing any
+    /// asked for before.
+    Notify {
+        /// The events, or `None` for `NOTIFY NONE`.
+        set: Option<NotifySet<'a>>,
+    },
+
     /// `URLFETCH 1*(SP url-fetch-arg)` (RFC 4467 Section 6.3.3, RFC 5524
     /// Section 3): what each URL names, answered by `URLFETCH`.
     UrlFetch {
@@ -2105,6 +2114,7 @@ impl<'a> CommandBody<'a> {
             Self::GenUrlAuth { .. } => "GENURLAUTH",
             Self::ResetKey { .. } => "RESETKEY",
             Self::UrlFetch { .. } => "URLFETCH",
+            Self::Notify { .. } => "NOTIFY",
             Self::Move { .. } => "MOVE",
             #[cfg(feature = "ext_id")]
             Self::Id { .. } => "ID",

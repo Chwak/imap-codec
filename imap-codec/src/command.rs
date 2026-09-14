@@ -55,6 +55,7 @@ use crate::{
         enable::enable,
         idle::idle,
         r#move::r#move,
+        notify::notify,
         quota::{getquota, getquotaroot, setquota},
         sort::sort,
         thread::thread,
@@ -145,6 +146,7 @@ pub(crate) fn command_any(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
 ///                enable /       ; RFC 5161
 ///                compress /     ; RFC 4978
 ///                resetkey / genurlauth / urlfetch / ; RFC 4467
+///                notify /       ; RFC 5465
 ///                setacl / deleteacl / getacl / ; RFC 4314
 ///                listrights / myrights /
 ///                getquota /     ; RFC 9208
@@ -157,10 +159,10 @@ pub(crate) fn command_any(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
 /// Note: Valid only in Authenticated or Selected state
 pub(crate) fn command_auth(input: &[u8]) -> IMAPResult<&[u8], CommandBody> {
     alt((
-        // RFC 4314, before LIST and DELETE, whose names begin its own two.
-        acl_command,
-        // RFC 4467 and RFC 5524.
-        urlauth_command,
+        // RFC 4314, before LIST and DELETE, whose names begin its own two;
+        // RFC 4467 and RFC 5524; RFC 5465. One alternative, so that `alt`
+        // stays within its 21.
+        alt((acl_command, urlauth_command, notify)),
         append,
         create,
         delete,

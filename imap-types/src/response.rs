@@ -1004,6 +1004,15 @@ pub enum Code<'a> {
         mechanisms: Vec<(Atom<'a>, Option<Vec<u8>>)>,
     },
 
+    /// `NOTIFICATIONOVERFLOW` (RFC 5465 Section 5.8): the server has
+    /// stopped sending notifications, as if `NOTIFY NONE` had been sent.
+    NotificationOverflow,
+
+    /// `BADEVENT (event-name ...)` (RFC 5465 Section 3.1): a `NOTIFY` asked
+    /// for an event the server does not support; the list is every event
+    /// it does.
+    BadEvent(Vec1<Atom<'a>>),
+
     /// IMAP4 Extension for Conditional STORE Operation (RFC 4551)
     /// A server supporting the persistent storage of mod-sequences for the mailbox
     /// MUST send the OK untagged response including HIGHESTMODSEQ response
@@ -1211,6 +1220,8 @@ pub enum Capability<'a> {
     ObjectId,
     /// UNAUTHENTICATE extension (RFC 8437).
     Unauthenticate,
+    /// NOTIFY extension (RFC 5465).
+    Notify,
     /// REPLACE extension (RFC 8508).
     Replace,
     /// ACL extension (RFC 4314). Its `RIGHTS=` companion is an `Other`.
@@ -1292,6 +1303,7 @@ impl Display for Capability<'_> {
             Self::ListStatus => write!(f, "LIST-STATUS"),
             Self::ObjectId => write!(f, "OBJECTID"),
             Self::Unauthenticate => write!(f, "UNAUTHENTICATE"),
+            Self::Notify => write!(f, "NOTIFY"),
             Self::Replace => write!(f, "REPLACE"),
             Self::Acl => write!(f, "ACL"),
             Self::UrlAuth => write!(f, "URLAUTH"),
@@ -1385,6 +1397,7 @@ impl<'a> From<Atom<'a>> for Capability<'a> {
             "list-status" => Self::ListStatus,
             "objectid" => Self::ObjectId,
             "unauthenticate" => Self::Unauthenticate,
+            "notify" => Self::Notify,
             "replace" => Self::Replace,
             "acl" => Self::Acl,
             "urlauth" => Self::UrlAuth,

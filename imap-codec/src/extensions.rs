@@ -13,6 +13,7 @@ pub mod metadata;
 pub mod r#move;
 #[cfg(feature = "ext_namespace")]
 pub mod namespace;
+pub mod notify;
 pub mod objectid;
 pub mod quota;
 pub mod sort;
