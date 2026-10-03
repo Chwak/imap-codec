@@ -839,6 +839,10 @@ impl EncodeIntoContext for FetchModifier {
         match self {
             FetchModifier::ChangedSince(since) => write!(ctx, "CHANGEDSINCE {since}"),
             FetchModifier::Vanished => write!(ctx, "VANISHED"),
+            FetchModifier::Partial(range) => {
+                ctx.write_all(b"PARTIAL ")?;
+                range.encode_ctx(ctx)
+            }
         }
     }
 }
@@ -1717,7 +1721,11 @@ impl EncodeIntoContext for SearchReturnOption {
 
 impl EncodeIntoContext for PartialRange {
     fn encode_ctx(&self, ctx: &mut EncodeContext) -> std::io::Result<()> {
-        write!(ctx, "{}:{}", self.from, self.to)
+        if self.from_last {
+            write!(ctx, "-{}:-{}", self.from, self.to)
+        } else {
+            write!(ctx, "{}:{}", self.from, self.to)
+        }
     }
 }
 

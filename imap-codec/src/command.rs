@@ -828,6 +828,13 @@ pub(crate) fn fetch_modifiers(input: &[u8]) -> IMAPResult<&[u8], Vec<FetchModifi
 ///                     ;; VANISHED UID FETCH modifier conforms to the fetch-modifier syntax defined in [RFC4466].
 ///                     ;; It is only allowed in the UID FETCH command.
 /// ```
+///
+/// From RFC 9394 (PARTIAL):
+///
+/// ```abnf
+/// fetch-modifier      =/ modifier-partial
+/// modifier-partial    = "PARTIAL" SP partial-range
+/// ```
 pub(crate) fn fetch_modifier(input: &[u8]) -> IMAPResult<&[u8], FetchModifier> {
     alt((
         map(
@@ -835,6 +842,10 @@ pub(crate) fn fetch_modifier(input: &[u8]) -> IMAPResult<&[u8], FetchModifier> {
             FetchModifier::ChangedSince,
         ),
         value(FetchModifier::Vanished, tag_no_case("VANISHED")),
+        map(
+            preceded(tag_no_case("PARTIAL "), crate::search::partial_range),
+            FetchModifier::Partial,
+        ),
     ))(input)
 }
 
@@ -1003,6 +1014,35 @@ mod tests {
 
     use super::*;
     use crate::{CommandCodec, encode::Encoder};
+
+    #[cfg(feature = "ext_condstore_qresync")]
+    #[test]
+    fn test_parse_fetch_modifier_partial() {
+        use std::num::NonZeroU64;
+
+        use imap_types::search::PartialRange;
+
+        let n = |v: u32| NonZeroU32::new(v).unwrap();
+        // RFC 9394 Section 3.2's example: the last thirty changed since.
+        let (rem, got) = fetch_modifiers(b" (PARTIAL -1:-30 CHANGEDSINCE 98305)\r\n").unwrap();
+        assert_eq!(rem, b"\r\n");
+        assert_eq!(
+            got,
+            vec![
+                FetchModifier::Partial(PartialRange::from_last(n(1), n(30))),
+                FetchModifier::ChangedSince(NonZeroU64::new(98305).unwrap()),
+            ]
+        );
+        let (_, got) = fetch_modifiers(b" (PARTIAL 1:5)\r\n").unwrap();
+        assert_eq!(
+            got,
+            vec![FetchModifier::Partial(PartialRange::new(n(1), n(5)))]
+        );
+        crate::testing::known_answer_test_encode((
+            FetchModifier::Partial(PartialRange::from_last(n(3), n(1))),
+            b"PARTIAL -1:-3".as_ref(),
+        ));
+    }
 
     #[test]
     fn test_parse_fetch() {

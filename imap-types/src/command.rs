@@ -2153,6 +2153,9 @@ pub enum SelectParameter {
 pub enum FetchModifier {
     ChangedSince(NonZeroU64),
     Vanished,
+    /// `PARTIAL` (RFC 9394 Section 3.2): only this slice of the messages
+    /// the set names, by position among them.
+    Partial(crate::search::PartialRange),
 }
 
 #[cfg(feature = "ext_condstore_qresync")]

@@ -115,11 +115,30 @@ pub(crate) fn search_return_opt(input: &[u8]) -> IMAPResult<&[u8], SearchReturnO
 /// what `1:*` meant would answer a different question from the one the
 /// next server answers, and the whole point of the option is that a
 /// client can page through a result the same way everywhere.
+///
+/// RFC 9394 Section 3.1 adds a range counted from the end:
+///
+/// ```abnf
+/// partial-range-last  = MINUS nz-number ":" MINUS nz-number
+/// partial-range       = partial-range-first / partial-range-last
+/// ```
+///
+/// Both ends are negative or neither is: `-1:5` is a syntax error.
 pub(crate) fn partial_range(input: &[u8]) -> IMAPResult<&[u8], PartialRange> {
-    map(
-        separated_pair(nz_number, tag(b":"), nz_number),
-        |(from, to)| PartialRange::new(from, to),
-    )(input)
+    alt((
+        map(
+            separated_pair(
+                preceded(tag(b"-"), nz_number),
+                tag(b":"),
+                preceded(tag(b"-"), nz_number),
+            ),
+            |(from, to)| PartialRange::from_last(from, to),
+        ),
+        map(
+            separated_pair(nz_number, tag(b":"), nz_number),
+            |(from, to)| PartialRange::new(from, to),
+        ),
+    ))(input)
 }
 
 /// ```abnf
@@ -463,6 +482,8 @@ mod tests {
         sequence::{Sequence, SequenceSet},
     };
 
+    use std::num::NonZeroU32;
+
     use super::*;
     use crate::testing::known_answer_test_encode;
 
@@ -536,6 +557,33 @@ mod tests {
             uid: false,
         };
         assert_eq!(val, expected);
+    }
+
+    #[test]
+    fn test_parse_partial_range() {
+        let n = |v: u32| NonZeroU32::new(v).unwrap();
+        // RFC 9394 Section 3.1: either way round, from the start or the end.
+        let (_, r) = partial_range(b"500:400 ").unwrap();
+        assert_eq!(r, PartialRange::new(n(400), n(500)));
+        assert!(!r.from_last);
+        let (_, r) = partial_range(b"-1:-100 ").unwrap();
+        assert_eq!(r, PartialRange::from_last(n(1), n(100)));
+        let (_, r) = partial_range(b"-500:-400 ").unwrap();
+        assert_eq!((r.from, r.to, r.from_last), (n(400), n(500), true));
+        for bad in [&b"-1:5 "[..], b"1:-5 ", b"0:5 ", b"-0:-5 ", b"1:* "] {
+            assert!(
+                partial_range(bad).is_err(),
+                "{:?}",
+                std::str::from_utf8(bad)
+            );
+        }
+    }
+
+    #[test]
+    fn test_encode_partial_range() {
+        let n = |v: u32| NonZeroU32::new(v).unwrap();
+        known_answer_test_encode((PartialRange::from_last(n(100), n(1)), b"-1:-100".as_ref()));
+        known_answer_test_encode((PartialRange::new(n(5), n(1)), b"1:5".as_ref()));
     }
 
     #[test]

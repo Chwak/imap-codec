@@ -292,6 +292,9 @@ pub struct PartialRange {
     pub from: NonZeroU32,
     /// The last position wanted, inclusive.
     pub to: NonZeroU32,
+    /// Counted from the end (RFC 9394 Section 3.1, `-1:-100`): position
+    /// one is the last result, two the one before it.
+    pub from_last: bool,
 }
 
 impl PartialRange {
@@ -301,6 +304,17 @@ impl PartialRange {
         Self {
             from: a.min(b),
             to: a.max(b),
+            from_last: false,
+        }
+    }
+
+    /// A range counted from the end, `-a:-b` (RFC 9394 Section 3.1), its
+    /// ends in order: `-500:-400` is `-400:-500`.
+    #[must_use]
+    pub fn from_last(a: NonZeroU32, b: NonZeroU32) -> Self {
+        Self {
+            from_last: true,
+            ..Self::new(a, b)
         }
     }
 
